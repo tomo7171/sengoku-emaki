@@ -26,6 +26,7 @@ jobs:
         run: |
           mkdir -p site
           cp index.html preview.png .nojekyll site/
+          if [ -f battle.png ]; then cp battle.png site/; fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
