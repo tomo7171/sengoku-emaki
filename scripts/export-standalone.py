@@ -13,14 +13,14 @@ for name in ('tenka-portraits.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenk
     content = (root / name).read_text(encoding='utf-8')
     if '</script' in content.lower():
         raise ValueError(f'Unsafe inline script terminator in {name}')
-    tag = f'<script src="{name}"></script>'
-    if html.count(tag) != 1:
+    tags = re.findall(r'<script src="' + re.escape(name) + r'(?:\?[^"<>]*)?"></script>', html)
+    if len(tags) != 1:
         raise ValueError(f'Expected exactly one script reference: {name}')
-    html = html.replace(tag, f'<script>\n{content}\n</script>')
-style_tag = '<link rel="stylesheet" href="tenka-ui.css">'
-if html.count(style_tag) != 1:
+    html = html.replace(tags[0], f'<script>\n{content}\n</script>')
+style_tags = re.findall(r'<link rel="stylesheet" href="tenka-ui\.css(?:\?[^"<>]*)?">', html)
+if len(style_tags) != 1:
     raise ValueError('Expected exactly one stylesheet reference')
-html = html.replace(style_tag, '<style>\n' + (root / 'tenka-ui.css').read_text(encoding='utf-8') + '\n</style>')
+html = html.replace(style_tags[0], '<style>\n' + (root / 'tenka-ui.css').read_text(encoding='utf-8') + '\n</style>')
 if re.search(r'<script\b[^>]*\bsrc\s*=', html, re.I):
     raise ValueError('A runtime script still requires another file')
 args.output.parent.mkdir(parents=True, exist_ok=True)
