@@ -105,6 +105,55 @@ test('siege troops cross both breached Inabayama gates and capture the inner bai
   assert.ok(castle(settled.state, 'inabayama').troops > 0);
 });
 
+for (const force of ['mixed', 'firearms']) {
+  test(`Nanao's overlapping baileys remain traversable after breaching all three gates (${force})`, () => {
+    const state = Game.newGame();
+    state.playerClan = 'jinbo';
+    garrison(state, 'toyama', force === 'mixed'
+      ? { ashigaru: 5000, archer: 2000, cavalry: 1000, firearm: 4000, navy: 0 }
+      : { ashigaru: 0, archer: 0, cavalry: 0, firearm: 12000, navy: 0 });
+    garrison(state, 'nanao', { ashigaru: 250, archer: 100, cavalry: 0, firearm: 50, navy: 0 });
+    const snapshot = clone(state);
+    const battle = Game.startBattle(Game.createBattle({ state, sourceId: 'toyama', targetId: 'nanao', mode: 'siege' }));
+    let contestedHonmaru = false, defeatedBeforeOccupation = false, steps = 0;
+    const occupied = () => battle.units.some(unit => unit.side === 'attacker' && unit.troops > 0
+      && !['routed', 'destroyed', 'retreating'].includes(unit.status)
+      && Math.abs(unit.x - battle.captureZone.x) <= battle.captureZone.width / 2
+      && Math.abs(unit.z - battle.captureZone.z) <= battle.captureZone.depth / 2);
+    while (battle.phase === 'fighting' && steps++ < 720) {
+      Game.simulateTick(battle);
+      battle.ledger.push({ kind: 'tick', steps: 1 });
+      const fightingDefenders = battle.units.some(unit => unit.side === 'defender' && unit.troops > 0
+        && !['routed', 'destroyed', 'retreating'].includes(unit.status) && unit.order !== 'retreat');
+      if (occupied() && fightingDefenders) {
+        contestedHonmaru = true;
+        assert.equal(battle.phase, 'fighting', 'entering a defended bailey cannot grant an automatic victory');
+      }
+      if (!fightingDefenders && !occupied()) {
+        defeatedBeforeOccupation = true;
+        assert.equal(battle.phase, 'fighting', 'defeating the garrison still requires entering the main bailey');
+      }
+    }
+    assert.equal(battle.phase, 'finished');
+    assert.equal(battle.winner, 'attacker', 'do not time out at the overlapping rear palisade beside the second gate');
+    assert.ok(battle.time < 180, 'the army physically reaches the objective before the siege time limit');
+    const gates = battle.structures.filter(item => item.kind === 'gate');
+    assert.equal(gates.length, 3);
+    assert.ok(gates.every(gate => gate.hp === 0));
+    assert.ok(occupied());
+    if (force === 'mixed') assert.ok(contestedHonmaru, 'exercise a living garrison contesting the main bailey');
+    else assert.ok(defeatedBeforeOccupation, 'exercise an annihilated garrison before the attackers enter the main bailey');
+    assert.ok(Tactics.verify(state, battle), 'the repaired path reproduces exactly through the production command ledger');
+    const altered = clone(battle); altered.units[0].x++;
+    assert.equal(Tactics.verify(state, altered), null, 'moving a survivor in the finished record invalidates settlement');
+    const settled = Game.settle(state, battle);
+    assert.equal(settled.ok, true, settled.message); valid(settled.state);
+    assert.equal(castle(settled.state, 'nanao').clan, state.playerClan);
+    assert.ok(castle(settled.state, 'nanao').troops > 0);
+    assert.deepEqual(clone(state), snapshot, 'settlement leaves the prebattle state untouched');
+  });
+}
+
 test('player garrison obeys hold, replays a combat formation change and retains its castle on defensive victory', () => {
   const state = defenseState(true);
   let battle = Game.startBattle(Tactics.createDefense(state));

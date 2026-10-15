@@ -74,7 +74,7 @@
     };
     const t = s.tenka;
     for (const key of ['loyalty', 'assignments', 'estates']) if (!t[key] || typeof t[key] !== 'object' || Array.isArray(t[key])) t[key] = {};
-    for (const key of ['chronicle', 'events', 'processedBattles', 'casualties', 'turnReports']) if (!Array.isArray(t[key])) t[key] = [];
+    for (const key of ['chronicle', 'events', 'processedBattles', 'casualties', 'turnReports', 'pendingCaptures']) if (!Array.isArray(t[key])) t[key] = [];
     // A seasonal task expires with its turn. Invalid/future save entries must
     // never lock an officer later or create a task that cannot be completed.
     for (const [id, task] of Object.entries(t.assignments)) {
@@ -106,13 +106,34 @@
     return { available: available.length, totalAdults: adults.length, minors: roster.length - adults.length, reason, message };
   }
   function administrationFallback(s, availability = officerAvailability(s)) {
-    if (!availability.reason || s.gameOver || !owned(s).length) return null;
+    if (!availability.reason || s.gameOver&&s.winner!==s.playerClan || !owned(s).length) return null;
     return { id: ADMINISTRATION_ID, name: '奉行衆', clan: s.playerClan, status: 'active',
       politics: 35, intelligence: 30, leadership: 30, available: true, administrative: true,
       allowedActions: [...ADMINISTRATION_ACTIONS], reason: availability.reason };
   }
   function clearCommand(s, id) {
     for (const army of Object.values(s.armies || {})) if (army.commanderId === id) army.commanderId = null;
+  }
+  // Core captures run before the whole AI round is settled. Preserve each
+  // garrison's transition now, so a later fall of its retreat destination does
+  // not turn the earlier retreat into a capture in the wrong battle report.
+  function recordCapture(s, { targetId, defenderClan, winnerClan, before }) {
+    s.tenka ||= {};
+    const snapshot = o => ({ id:o.id, name:o.name, clan:o.clan, castleId:o.castleId,
+      status:o.status, capturedBy:o.capturedBy ?? null });
+    const officers = (before || []).filter(o => o.status === 'active' && o.clan === defenderClan && o.castleId === targetId);
+    const event = { targetId, defenderClan, winnerClan, turn:s.turn, round:s.aiRound || 0,
+      before:officers.map(snapshot), after:officers.map(o => snapshot(getOfficer(s,o.id) || o)) };
+    const pending = Array.isArray(s.tenka.pendingCaptures) ? s.tenka.pendingCaptures : [];
+    s.tenka.pendingCaptures = [...pending, event].slice(-20);
+  }
+  function recordDeath(s, officer, cause) {
+    if (globalThis.TenkaDynasty?.recordDeath) return globalThis.TenkaDynasty.recordDeath(s, officer, { cause });
+    officer.historicalDeath ??= officer.death;
+    Object.assign(officer, { status:'dead', castleId:null, capturedBy:null, deathYear:s.year,
+      deathSeason:s.season, death:s.year, diedAtAge:officer.birth==null?null:Math.max(0,s.year-officer.birth), deathCause:cause });
+    clearCommand(s, officer.id); delete s.tenka.assignments[officer.id];
+    return officer;
   }
   function changeEmployer(s, o, clan, castleId) {
     clearCommand(s, o.id);
@@ -136,10 +157,11 @@
   }
   function act(input, action) {
     if (!action || !ACTIONS[action.type]) return { ok: false, state: input, message: 'この命令は存在しません。' };
-    if (input.gameOver) return { ok: false, state: input, message: 'この年代記は決着しました。' };
+    if (input.gameOver && !(input.winner===input.playerClan&&['enlist','release','execute'].includes(action.type))) return { ok: false, state: input, message: 'この年代記は決着しました。' };
     const s = initialize(input), t = s.tenka, rule = ACTIONS[action.type];
+    const postVictory = s.gameOver && s.winner===s.playerClan && ['enlist','release','execute'].includes(action.type);
     const fail = message => ({ ok: false, state: input, message });
-    if (s.actionPoints < 1) return fail('今季の命令を使い切りました。次の季節へ進めてください。');
+    if (s.actionPoints < 1 && !postVictory) return fail('今季の命令を使い切りました。次の季節へ進めてください。');
     const c = getCastle(s, action.castleId || s.selectedCastleId);
     const availability = officerAvailability(s), fallback = administrationFallback(s, availability);
     const administrative = action.officerId === ADMINISTRATION_ID;
@@ -148,7 +170,7 @@
     if (administrative && !delegate) return fail('未任務の成人武将がいるため、その武将を担当に選んでください。');
     if (!delegate || delegate.clan !== s.playerClan || delegate.status !== 'active') return fail(availability.message || '活動中の自家武将を担当に選んでください。');
     if (!administrative && !adult(s, delegate)) return fail(`${delegate.name}は十五歳未満で、まだ任務に出仕できません。成人武将を選ぶか、奉行衆に政務を任せてください。`);
-    if (!administrative && !isOfficerAvailable(s, delegate)) return fail(`${delegate.name}は今季の任務中です。未任務の武将を選ぶか、全員任務中なら奉行衆に政務を任せてください。次の季節には任務が解除されます。`);
+    if (!administrative && !postVictory && !isOfficerAvailable(s, delegate)) return fail(`${delegate.name}は今季の任務中です。未任務の武将を選ぶか、全員任務中なら奉行衆に政務を任せてください。次の季節には任務が解除されます。`);
     const target = getOfficer(s, action.targetOfficerId);
     const domestic = ['reclaim', 'commercial', 'levy'].includes(action.type);
     if (domestic && (!c || c.clan !== s.playerClan)) return fail('自領の城を指定してください。');
@@ -213,16 +235,24 @@
       s.relations[target.clan] = clamp((s.relations[target.clan] || 0) + 20, -100, 100); s.prestige = clamp(s.prestige + 2, 0, 100);
       message = `${delegate.name}が${target.name}を解放。${home ? `${home.name}へ帰還しました。旧主との友好 +20。` : '旧主が領地を失っているため浪人となりました。'}`;
     } else if (action.type === 'execute') {
-      target.status = 'dead'; target.castleId = null; target.capturedBy = null; clearCommand(s, target.id);
+      recordDeath(s, target, 'execution');
       t.casualties.unshift({ officerId: target.id, name: target.name, cause: 'execution', date: date(s), turn: s.turn });
       s.relations[target.clan] = -100; s.prestige = Math.max(0, s.prestige - 5);
       for (const o of s.officers.filter(o => o.clan === s.playerClan && o.status === 'active')) t.loyalty[o.id] = Math.max(0, t.loyalty[o.id] - 3);
       message = `${target.name}を処断しました。相手の家との友好は -100、威信 -5。家臣の忠誠も低下しました。`;
     }
-    s.gold -= rule.gold; s.food -= rule.food; s.actionPoints--;
+    s.gold -= rule.gold; s.food -= rule.food; if(!postVictory)s.actionPoints--;
     // The magistrates are an administrative body, not a generated officer or
     // war commander. They can cover remaining orders at their lower abilities.
     if (!administrative) t.assignments[delegate.id] = { turn: s.turn, type: action.type, outcome, target: target?.id || c?.id || targetClan };
+    if (['enlist','release','execute'].includes(action.type)) {
+      t.prisonerDecisions ||= [];
+      const capture = t.casualties.find(entry=>entry.officerId===target.id&&entry.cause==='captured');
+      t.prisonerDecisions.unshift({ officerId:target.id, name:target.name,
+        battleId:capture?.battleId || s.lastBattle?.officerOutcomes?.find(entry=>entry.officerId===target.id&&entry.outcome==='captured')&&s.lastBattle.id || null,
+        type:action.type, outcome, turn:s.turn, year:s.year, season:s.season, message });
+      t.prisonerDecisions = t.prisonerDecisions.slice(0, 1000);
+    }
     append(s, ['negotiation', 'release'].includes(action.type) ? 'diplomacy' : action.type === 'levy' ? 'military' : 'domestic', rule.label, message);
     return { ok: true, state: s, message };
   }
@@ -331,12 +361,20 @@
   }
   function afterBattle(input, previousState) {
     const s = initialize(input), t = s.tenka;
+    const captures = t.pendingCaptures, usedCaptures = new Set();
     const previousIds = new Set([previousState?.lastBattle, ...(previousState?.aiBattles || [])].filter(Boolean).map(b => b.id));
     const battles = [...(s.aiBattles || []), s.lastBattle].filter(Boolean);
     const unique = new Map(battles.map(b => [b.id, b]));
     for (const b of unique.values()) {
       if (!b.id || t.processedBattles.includes(b.id) || previousIds.has(b.id)) continue;
       t.processedBattles.push(b.id);
+      const captureIndex = b.won && b.mode === 'siege' ? captures.findIndex((event,index) =>
+        !usedCaptures.has(index) && event.turn === s.turn && event.targetId === b.targetId
+          && event.defenderClan === b.defenderClan && event.winnerClan === b.attackerClan) : -1;
+      const capture = captureIndex < 0 ? null : captures[captureIndex];
+      if (capture) usedCaptures.add(captureIndex);
+      const captureBefore = new Map((capture?.before || []).map(o => [o.id,o]));
+      const captureAfter = new Map((capture?.after || []).map(o => [o.id,o]));
       const source = getCastle(s, b.sourceId), target = getCastle(s, b.targetId);
       const attackerTroops = b.attackerArmy?.troops || 0, defenderTroops = b.defenderArmy?.troops || 0;
       if (b.tacticsVersion === 1) {
@@ -354,25 +392,70 @@
       const winner = b.won ? b.attackerClan : b.defenderClan;
       const loser = b.won ? b.defenderClan : b.attackerClan;
       const commander = b.won ? b.defenderArmy?.commanderId : b.attackerArmy?.commanderId;
-      const officer = getOfficer(s, commander), oldOfficer = previousState && getOfficer(previousState, commander);
-      if (!officer || officer.status === 'dead' || officer.status === 'captive') continue;
-      if (officer.clan !== loser || (oldOfficer && oldOfficer.status !== 'active')) continue;
-      if ((b.won ? defenderTroops : attackerTroops) <= 0) continue;
-      const ratio = b.won ? b.enemyCasualties / Math.max(1, defenderTroops) : b.casualties / Math.max(1, attackerTroops);
-      const roll = hash(`fate:${b.id}:${officer.id}`) % 10000;
-      let cause = null;
-      // Most defeated commanders escape. Fatality applies only to catastrophic
-      // losses (0.5%, rising to 1% at 75% losses); ordinary defeats never kill.
-      const fatalRisk = ratio >= 0.75 ? 100 : ratio >= 0.5 ? 50 : 0;
-      const captureRisk = ratio >= 0.3 ? (b.mode === 'siege' ? 800 : 500) : 0;
-      if (roll < fatalRisk) { cause = 'killed'; officer.status = 'dead'; officer.castleId = null; officer.capturedBy = null; }
-      else if (roll < fatalRisk + captureRisk) { cause = 'captured'; officer.status = 'captive'; officer.castleId = null; officer.capturedBy = winner; }
-      if (cause) {
-        clearCommand(s, officer.id);
-        t.casualties.unshift({ officerId: officer.id, name: officer.name, cause, turn: s.turn, date: date(s), battleId: b.id });
-        append(s, 'battle', cause === 'killed' ? '武将、討死' : '武将を捕縛', `${officer.name}が${b.defender || target?.name || '戦場'}で${cause === 'killed' ? '討死しました。今後の任務には出仕しません。' : '捕らえられました。勝者は召し抱え・解放・処断を選べます。'}`);
+      const defeated = getOfficer(s, commander), oldOfficer = previousState && getOfficer(previousState, commander);
+      const killedHere = new Set(), capturedHere = new Set();
+      const foughtLater = capture && captures.some((event,index) => index > captureIndex
+        && event.turn === s.turn && event.before?.some(o => o.id === commander));
+      if (defeated && !['dead','captive'].includes(defeated.status) && defeated.clan === loser
+          && !foughtLater && (!oldOfficer || oldOfficer.status === 'active') && (b.won ? defenderTroops : attackerTroops) > 0) {
+        const ratio = b.won ? b.enemyCasualties / Math.max(1, defenderTroops) : b.casualties / Math.max(1, attackerTroops);
+        const roll = hash(`fate:${b.id}:${defeated.id}`) % 10000;
+        const fatalRisk = ratio >= 0.75 ? 100 : ratio >= 0.5 ? 50 : 0;
+        const captureRisk = ratio >= 0.3 ? (b.mode === 'siege' ? 800 : 500) : 0;
+        if (roll < fatalRisk) { recordDeath(s, defeated, 'battle'); killedHere.add(defeated.id); }
+        else if (roll < fatalRisk + captureRisk) {
+          Object.assign(defeated, {status:'captive',castleId:null,capturedBy:winner});
+          capturedHere.add(defeated.id);
+          clearCommand(s, defeated.id); delete t.assignments[defeated.id];
+        }
       }
+      const participants = new Map();
+      const before = previousState || s;
+      const addParticipant = (id, side) => {
+        const person = side === 'defender' && captureBefore.has(id) ? captureBefore.get(id) : getOfficer(before, id) || getOfficer(s, id);
+        if (!person || ['dead','unborn','captive','ronin'].includes(person.status)) return;
+        if (person.status!=='active' && getOfficer(s,id)?.status!=='captive') return;
+        participants.set(person.id, {person,side});
+      };
+      addParticipant(b.attackerArmy?.commanderId, 'attacker');
+      addParticipant(b.defenderArmy?.commanderId, 'defender');
+      for (const person of before.officers || []) {
+        if (person.castleId===b.sourceId && person.clan===b.attackerClan) addParticipant(person.id,'attacker');
+        if (!capture && person.castleId===b.targetId && person.clan===b.defenderClan) addParticipant(person.id,'defender');
+      }
+      for (const person of captureBefore.values()) addParticipant(person.id,'defender');
+      for (const entry of b.deployedCommanders || []) {
+        const id = typeof entry==='string' ? entry : entry.officerId || entry.commanderId || entry.id;
+        const person = getOfficer(before,id);
+        if (person) addParticipant(id, entry.side || (person.clan===b.attackerClan?'attacker':'defender'));
+      }
+      b.year=s.year; b.season=s.season; b.turn=s.turn;
+      b.officerOutcomes = [...participants.values()].map(({person,side})=>{
+        const current = getOfficer(s,person.id), clan = side==='attacker'?b.attackerClan:b.defenderClan;
+        const otherCapture = capture ? null : captures.find(event => event.after?.some(o => o.id===person.id && o.status==='captive'));
+        const atBattle = capturedHere.has(person.id) ? current : side==='defender' && captureAfter.get(person.id)
+          || otherCapture?.before.find(o => o.id===person.id) || current;
+        let outcome = clan===loser?'retreated':'survived';
+        if (killedHere.has(person.id)) outcome='killed';
+        else if (atBattle?.status==='dead') outcome='unrecorded';
+        else if (atBattle?.status==='captive' && atBattle.capturedBy!==person.capturedBy) outcome='captured';
+        const entry={officerId:person.id,name:person.name,clan,side,outcome,capturedBy:outcome==='captured'?atBattle.capturedBy:null};
+        if (outcome==='killed'||outcome==='captured') {
+          const cause=outcome==='killed'?'killed':'captured';
+          if (!t.casualties.some(c=>c.officerId===person.id&&c.battleId===b.id&&c.cause===cause)) {
+            t.casualties.unshift({officerId:person.id,name:person.name,cause,turn:s.turn,date:date(s),battleId:b.id,capturedBy:entry.capturedBy});
+            append(s,'battle',cause==='killed'?'武将、討死':'武将を捕縛',`${person.name}が${b.defender || target?.name || '戦場'}で${cause==='killed'?'討死しました。':'捕らえられました。戦後の処遇から召し抱え・解放・処断を選べます。'}`);
+          }
+        }
+        return entry;
+      });
+      for (const duplicate of battles) if(duplicate!==b&&duplicate.id===b.id) {
+        duplicate.officerOutcomes=clone(b.officerOutcomes);
+        duplicate.year=b.year; duplicate.season=b.season; duplicate.turn=b.turn;
+      }
+
     }
+    t.pendingCaptures = captures.filter((event,index) => !usedCaptures.has(index) && event.turn === s.turn);
     t.processedBattles = t.processedBattles.slice(-2000); t.casualties = t.casualties.slice(0, 500);
     return s;
   }
@@ -409,5 +492,5 @@
     append(s, 'scenario', '天下への旗を掲げる', `${castles[0].clanName}の領国経営を開始。家臣に命令を託し、内政・外交・合戦で天下統一を目指します。`);
     return { ok: true, state: s, message: `${castles[0].clanName}で開始しました。` };
   }
-  return { version: '1.0.0', initialize, act, advance, afterBattle, getView, chooseClan, mobilizationLimit, campaignFood, isOfficerAvailable, ACTIONS, EVENTS, SOURCES };
+  return { version: '1.0.0', initialize, act, advance, afterBattle, recordCapture, getView, chooseClan, mobilizationLimit, campaignFood, isOfficerAvailable, ACTIONS, EVENTS, SOURCES };
 });

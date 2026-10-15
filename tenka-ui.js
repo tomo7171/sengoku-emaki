@@ -6,6 +6,33 @@ const unitNames={ashigaru:'足軽',cavalry:'騎馬',firearm:'鉄砲',archer:'弓
 const seasons=['春','夏','秋','冬'];
 const labels={reclaim:'開墾を命じる',commercial:'商業を振興する',levy:'領民を動員する',reward:'家臣を加増する',negotiation:'使者を派遣する',infiltrate:'内応を働きかける',enlist:'召し抱える',release:'解放する',execute:'処断する'};
 function era(year){return year>=1615?'元和'+(year-1614)+'年':year>=1596?'慶長'+(year-1595)+'年':year>=1592?'文禄'+(year-1591)+'年':year>=1573?'天正'+(year-1572)+'年':year>=1570?'元亀'+(year-1569)+'年':'永禄'+(year-1557)+'年';}
+const outcomeLabels={survived:'生還',retreated:'退却・生還',escaped:'退却・生還',captured:'捕虜',killed:'討死',unrecorded:'安否の記録なし'};
+function battleAftermathView(state,battle=state.lastBattle){
+ const records=Array.isArray(battle?.officerOutcomes)?battle.officerOutcomes:null;
+ const decisions=Array.isArray(state.tenka?.prisonerDecisions)?state.tenka.prisonerDecisions:[];
+ const ownClan=state.playerClan;
+ const clanName=clan=>state.castles.find(c=>c.clan===clan)?.clanName||'他家';
+ const rows=(records||[]).filter(r=>r&&r.officerId).map(record=>{
+  const officer=state.officers.find(o=>o.id===record.officerId);
+  const own=record.clan===ownClan;
+  const decision=decisions.filter(d=>d.officerId===record.officerId&&(!d.battleId||d.battleId===battle.id)).sort((a,b)=>(b.turn||0)-(a.turn||0))[0];
+  const prisoner=officer?.status==='captive'&&officer.capturedBy===ownClan;
+  let current='';
+  if(record.outcome==='captured'){
+   if(prisoner)current='自家の捕虜・処遇を選択できます';
+   else if(officer?.status==='captive')current=clanName(officer.capturedBy)+'の捕虜';
+   else if(decision?.type==='execute'&&decision.outcome!=='failure')current='処断済み';
+   else if(officer?.status==='dead'||officer?.status==='executed')current='現在は故人';
+   else if(officer?.clan===ownClan&&officer?.status==='active')current='自家に出仕中';
+   else if(decision?.type==='release'&&decision.outcome!=='failure')current=officer?.status==='ronin'?'解放済み・浪人':'解放済み・旧主に帰参';
+   else if(officer?.status==='ronin')current='現在は浪人';
+   else if(officer?.status==='active')current=clanName(officer.clan)+'に出仕中';
+  }
+  return {...record,name:record.name||officer?.name||'名不詳',officer,own,prisoner,current,decision,label:outcomeLabels[record.outcome]||'記録あり'};
+ });
+ const counts={killed:rows.filter(o=>o.outcome==='killed').length,captured:rows.filter(o=>o.outcome==='captured').length,survived:rows.filter(o=>['survived','retreated','escaped'].includes(o.outcome)).length};
+ return {legacy:records===null,rows,counts};
+}
 function create(React){
 const h=React.createElement;
 function Portrait({officer,size=48,year}){return h('img',{className:'tenka-portrait',src:global.TenkaPortraits?.uri(officer,year==null?undefined:{year}),width:size,height:size,alt:officer.name+'の創作肖像',loading:'lazy'});}
@@ -54,8 +81,8 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
  const metric=(title,value,note)=>h('div',{className:'tenka-metric',key:title},h('small',null,title),h('strong',null,value),h('span',null,note));
  const economy=(view.castles||[]).find(c=>c.id===castle?.id)||castle;
  const loyalty=officer=>officer.loyalty??state.tenka?.loyalty?.[officer.id]??70;
- const age=officer=>officer.age??(officer.birth==null?null:state.year-officer.birth);
- const ageLabel=officer=>age(officer)==null?'年齢不詳':age(officer)+'歳';
+ const age=officer=>dynasty?.age?dynasty.age(state,officer):officer.age??(officer.birth==null?null:state.year-officer.birth);
+ const ageLabel=officer=>age(officer)==null?'年齢不詳':(['dead','executed'].includes(officer.status)?'享年 ':'')+age(officer)+'歳';
  const originLabel=officer=>officer.origin==='fictional'?'この年代記の人物':'史実の人物';
  const kin=(dynastyView.kin||[]).filter(o=>o.gender!=='female');
  const princesses=dynastyView.princesses||[];
@@ -108,7 +135,8 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    roster.some(o=>o.status==='active')?h('div',{className:'tenka-officer-grid'},roster.filter(o=>o.status==='active').map(o=>h('article',{className:'tenka-officer',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)+(o.busy?' ／ 今季は任務中':'')),h('small',null,'忠誠 '+loyalty(o)+' ／ 統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('button',{disabled:state.actionPoints<1||!!state.pendingDefense||!canAssign('reward'),onClick:()=>act('reward',{targetOfficerId:o.id})},'加増・褒賞'))))):h('p',{className:'tenka-note'},'成人の家臣がいません。上の「新たな家臣の登用」から人材を迎えてください。領国の政務は奉行衆が支えます。'),
    h('div',{className:'tenka-section-heading'},h('h4',null,'捕らえた武将'),h('span',null,prisoners.length+' 人')),
    prisoners.length?h('div',{className:'tenka-officer-grid'},prisoners.map(o=>h('article',{className:'tenka-officer prisoner',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('small',null,'統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('div',{className:'tenka-prisoner-actions'},['enlist','release','execute'].map(type=>h('button',{key:type,disabled:state.actionPoints<1||!!state.pendingDefense||!canAssign(type),onClick:()=>act(type,{targetOfficerId:o.id})},labels[type]))))))):h('p',{className:'tenka-note'},'捕虜はいません。落城・敗走時には武将の捕縛、討ち死に、逃亡が発生します。'),
-   h('p',{className:'tenka-note'},'史実に登場する人物を収録しています。合戦後の生死・離反・登用は、この年代記での分岐です。')),
+   h('p',{className:'tenka-note'},'史実に登場する人物を収録しています。合戦後の生死・離反・登用は、この年代記での分岐です。'),
+   state.lastBattle&&h(BattleAftermath,{state,battle:state.lastBattle,onState,onNotify,compact:true})),
   tab==='一門・継承'&&h('section',{className:'tenka-family'},
    h('div',{className:'tenka-section-heading'},h('h4',null,'家を継ぎ、次の世代を育てる'),h('span',null,'家督の備え・一門の誕生・姫の婚姻')),
    h('div',{className:'tenka-family-leaders'},[['当主',family.head],['世継ぎ',family.heir],['後見役',family.regent]].map(([role,o])=>h('article',{className:'tenka-family-leader',key:role},h('span',{className:'tenka-person-tag'},role),o?h(React.Fragment,null,h(Portrait,{officer:o,year:state.year,size:68}),h('strong',null,o.name),h('small',null,ageLabel(o)+' ／ '+originLabel(o))):h('p',null,role==='後見役'?'未指定（幼主を支える成人武将）':'未指定')))),
@@ -135,6 +163,46 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    h('details',{className:'tenka-historical-note'},h('summary',null,'再現と史料について'),h('p',null,'武将名・旧国・主要拠点は1560年春を基準としています。石高・兵数・能力・兵科相性はゲーム用の推計です。城郭は特徴を反映した模式復元、肖像は個人ごとの創作表現で、実際の容貌や発掘図面の完全復元ではありません。')))
  );
 }
+function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,compact=false}){
+ const [officerId,setOfficer]=React.useState('');
+ const [feedback,setFeedback]=React.useState(null);
+ const [executionId,setExecution]=React.useState(null);
+ if(!battle)return null;
+ const systems=global.TenkaSystems;
+ const model=battleAftermathView(state,battle);
+ const view=systems.getView(state);
+ const postVictory=state.gameOver&&state.winner===state.playerClan;
+ const available=(view.officers||[]).filter(o=>o.status==='active'&&(postVictory||o.available!==false&&!o.busy));
+ const candidates=available.length?available:view.administrationFallback?[view.administrationFallback]:[];
+ const delegate=candidates.find(o=>o.id===officerId)||candidates[0];
+ const destination=state.castles.find(c=>c.clan===state.playerClan);
+ const captives=model.rows.filter(o=>o.prisoner);
+ const blocked=type=>!onState?'この記録からの命令はできません':state.pendingDefense?'先に敵襲への対応を決めてください':state.gameOver&&!postVictory?'この年代記は決着しました':!postVictory&&state.actionPoints<1?'今季の命令がありません。次の季節に処遇を決められます':!delegate?'担当できる成人武将がいません':delegate.administrative&&!delegate.allowedActions?.includes(type)?'説得・処断には成人武将が必要です':(state.gold||0)<(systems.ACTIONS[type]?.gold||0)?'金が不足しています':'';
+ const decide=(type,row)=>{
+  const reason=blocked(type);
+  if(reason){setFeedback({id:row.officerId,ok:false,text:reason});return;}
+  const result=systems.act(state,{type,officerId:delegate.id,castleId:destination?.id,targetOfficerId:row.officerId});
+  setFeedback({id:row.officerId,ok:result.ok,text:result.message});setExecution(null);
+  if(result.ok)onState?.(result.state);
+  onNotify?.({text:result.message,success:result.ok});
+ };
+ return h('section',{className:'tenka-aftermath'+(compact?' compact':''),'aria-label':'戦後の武将・捕虜の処遇'},
+  h('div',{className:'tenka-aftermath-heading'},h('div',null,h('span',{className:'tenka-kicker'},'合戦後の報告'),h('h3',null,'武将の安否と捕虜の処遇')),h('small',null,battle.defender||'合戦の記録')),
+  model.legacy?h('p',{className:'tenka-note'},'この合戦は旧形式の記録のため、武将ごとの安否は記録されていません。現在の捕虜は「評定 → 家臣」で確認できます。次の合戦から人物別に記録します。'):h(React.Fragment,null,
+   h('p',{className:'tenka-aftermath-summary',role:'status'},'討死 '+model.counts.killed+' 人 ／ 捕虜 '+model.counts.captured+' 人 ／ 生還・退却 '+model.counts.survived+' 人'),
+   h('p',{className:'tenka-aftermath-note'},'当時の安否と現在の状態を表示します。兵士の損失には戦死・負傷・離散を含み、武将の討死とは別に記録します。'),
+   captives.length>0&&h('div',{className:'tenka-aftermath-delegate'},h('label',{className:'tenka-field'},h('span',null,'捕虜の処遇を命じる担当'),h('select',{'aria-label':'捕虜の処遇の担当武将',value:delegate?.id||'',disabled:!candidates.length,onChange:e=>setOfficer(e.target.value)},candidates.length?candidates.map(o=>h('option',{value:o.id,key:o.id},o.name+(o.administrative?' ／ 解放を代行':''))):h('option',{value:''},postVictory?'成人武将がいません':'未任務の成人武将がいません'))),h('small',null,(postVictory?'天下統一後の処遇は命令を消費しません。':'各処遇は命令1。')+'召し抱えは金 '+format(systems.ACTIONS.enlist.gold)+' 貫。奉行衆は解放を代行します。')),
+   model.rows.length?h('div',{className:'tenka-aftermath-list'},model.rows.map(row=>h('article',{className:'tenka-aftermath-person '+row.outcome,key:row.officerId},
+    row.officer&&h(Portrait,{officer:row.officer,year:battle.year||state.year,size:52}),
+    h('div',{className:'tenka-aftermath-person-body'},h('div',{className:'tenka-aftermath-person-title'},h('strong',null,row.name),h('span',{className:'tenka-side-tag'},row.own?'味方':'敵'),h('span',{className:'tenka-fate-tag'},row.label)),row.current&&h('small',null,'現在：'+row.current),row.decision?.message&&h('p',{className:'tenka-aftermath-decision'},row.decision.message),
+     row.prisoner&&h(React.Fragment,null,h('div',{className:'tenka-aftermath-actions'},['enlist','release','execute'].map(type=>h('button',{key:type,disabled:!!blocked(type),title:blocked(type)||systems.ACTIONS[type].description,onClick:()=>type==='execute'?setExecution(row.officerId):decide(type,row)},labels[type]))),
+      (blocked('release')||blocked('enlist'))&&h('small',{className:'tenka-aftermath-blocked'},blocked('release')||blocked('enlist')),
+      executionId===row.officerId&&h('div',{className:'tenka-execution-confirm',role:'alert'},h('p',null,row.name+'を処断しますか？ 武将は死亡し、友好・威信・家臣の忠誠が低下します。'),h('button',{onClick:()=>decide('execute',row)},'処断を確定する'),h('button',{onClick:()=>setExecution(null)},'戻る'))),
+     feedback?.id===row.officerId&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text))
+   ))):h('p',{className:'tenka-note'},'この合戦に出陣・在城した武将の記録はありません。')
+  )
+ );
+}
 function Tactics({battle,onBattle,selectedUnitId}){
  const side=battle.playerSide||'attacker';const unit=battle.units.find(u=>u.id===selectedUnitId&&u.side===side);
  const [message,setMessage]=React.useState('');
@@ -143,7 +211,7 @@ function Tactics({battle,onBattle,selectedUnitId}){
  const ambush=()=>{const result=global.TenkaTactics.ambush(battle,unit.id);if(result?.ok===false)setMessage(result.message);else{onBattle(result.battle||result);setMessage(result.message||'伏兵を配置しました。');}};
  return h('div',{className:'tenka-tactical-doctrine'},h('span',null,battle.playerSide==='defender'?'籠城軍の配置':'陣形と伏兵'),h('label',null,'陣形 ',h('select',{'aria-label':'部隊の陣形',value:unit.formation||'line',onChange:e=>formation(e.target.value)},[['line','横陣'],['wedge','魚鱗'],['defensive','方円'],['loose','散開']].map(([id,label])=>h('option',{value:id,key:id},label)))),h('button',{onClick:ambush,disabled:battle.phase!=='deployment'},unit.ambush?'伏兵を解除':'伏兵を配置'),h('small',{role:'status'},message||'森林・丘陵での伏兵は初撃を強化。陣形により移動と攻防が変化します。'),battle.supply&&h('small',null,'自軍の兵糧：'+format(Math.max(0,battle.supply[side].initial-battle.supply[side].consumed))+' 石 ／ 合戦中の消費 '+format(battle.supply[side].consumed)+' 石'));
 }
-return {Council,Tactics,Portrait};
+return {Council,Tactics,Portrait,BattleAftermath};
 }
-global.TenkaUI={create,era};
+global.TenkaUI={create,era,battleAftermathView};
 })(typeof window==='undefined'?globalThis:window);

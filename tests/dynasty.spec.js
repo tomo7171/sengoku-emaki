@@ -269,3 +269,103 @@ test('new child IDs stay bounded across long existing ancestry and eight subsequ
     headId = child.id;
   }
 });
+
+test('known birth dates migrate from canonical records; unknown dates receive marked adult estimates', () => {
+  const source = game();
+  source.officers[0].birth = 1360;
+  source.officers[1].birth = null;
+  Dynasty.configure({ officers: [officer('oda_nobunaga', '織田信長', 'oda', { birth: 1534 })] });
+  try {
+    const state = Dynasty.initialize(source);
+    const head = state.officers.find(o => o.id === 'oda_nobunaga'), retainer = state.officers.find(o => o.id === 'shibata_katsuie');
+    assert.equal(head.birth, 1534); assert.equal(Dynasty.age(state, head), 26);
+    assert.equal(retainer.birthEstimated, true); assert.ok(Dynasty.age(state, retainer) >= 28 && Dynasty.age(state, retainer) <= 55);
+    assert.equal(retainer.status, 'active');
+    assert.deepEqual(Dynasty.initialize(state), state, 'migration is stable across reads');
+  } finally { Dynasty.configure({}); }
+});
+
+test('natural death clears commands, transfers the house to its designated child, and records actual age', () => {
+  let state = Dynasty.act(game(), { type: 'appointHeir', targetOfficerId: 'oda_nobuo' }).state;
+  const head = state.officers.find(o => o.id === 'oda_nobunaga');
+  head.naturalDeathAge = 50; head.naturalDeathSeason = 1;
+  state.armies.kiyosu = { commanderId: head.id, units: { ashigaru: 100 } };
+  state.tenka.assignments[head.id] = { turn: state.turn, type: 'cultivate' };
+  const before = at(state, 1584, 0), notYet = Dynasty.advance(before);
+  assert.equal(notYet.officers.find(o => o.id === head.id).status, 'active');
+  const after = Dynasty.advance(at(notYet, 1584, 1), notYet), dead = after.officers.find(o => o.id === head.id);
+  assert.equal(dead.status, 'dead'); assert.equal(dead.deathCause, 'natural'); assert.equal(dead.deathYear, 1584);
+  assert.equal(dead.historicalDeath, 1600); assert.equal(dead.diedAtAge, 50); assert.equal(after.armies.kiyosu.commanderId, null);
+  assert.equal(after.tenka.assignments[head.id], undefined);
+  assert.equal(Dynasty.getView(after).family.head.id, 'oda_nobuo');
+  assert.equal(after.tenka.dynasty.deaths.filter(d => d.officerId === head.id).length, 1);
+  assert.deepEqual(Dynasty.advance(after), after, 'no new mortality draw on repeated advance');
+  const future = Dynasty.initialize(at(after, 1784));
+  assert.equal(Dynasty.age(future, future.officers.find(o => o.id === head.id)), 50, 'deceased ages stop advancing');
+});
+
+test('two-hundred-year legacy survivors are retired without reviving deaths or corrupting estate progress', () => {
+  const source = Dynasty.initialize(game()); source.year = 1770; source.turn = 841;
+  source.gold = 9876; source.officers.find(o => o.id === 'shibata_katsuie').status = 'dead';
+  const state = Dynasty.reconcile(source);
+  assert.equal(state.gold, 9876);
+  assert.equal(state.officers.find(o => o.id === 'shibata_katsuie').status, 'dead');
+  for (const o of state.officers) {
+    if (o.status === 'dead') assert.ok(Dynasty.age(state, o) <= 100, o.name);
+    else if (o.status !== 'unborn') assert.ok(Dynasty.age(state, o) <= 100, o.name);
+  }
+  const original = structuredClone(state);
+  assert.deepEqual(Dynasty.reconcile(state), original);
+  const hired = Dynasty.act(state, { type: 'recruit' }); assert.equal(hired.ok, true, hired.message);
+  assert.ok(Dynasty.getView(hired.state).family.head);
+});
+
+test('retainer children appear in their recorded years, follow the father clan, mature, and never duplicate', () => {
+  let state = game();
+  state.officers.push(officer('maeda_toshiie', '前田利家', 'oda', { birth: 1538 }),
+    officer('honda_masanobu', '本多正信', 'matsudaira', { birth: 1538 }));
+  state = Dynasty.initialize(state);
+  assert.equal(state.officers.some(o => o.id === 'maeda_toshinaga'), false);
+  state = Dynasty.advance(at(state, 1562));
+  const son = state.officers.find(o => o.id === 'maeda_toshinaga');
+  assert.equal(son.birth, 1562); assert.equal(son.status, 'child'); assert.equal(son.fatherId, 'maeda_toshiie');
+  assert.equal(son.isKin, false, 'a retainer child does not become a blood relative of the daimyo');
+  state = Dynasty.advance(at(state, 1565));
+  assert.equal(state.officers.find(o => o.id === 'honda_masazumi').birth, 1565);
+  state = Dynasty.advance(at(state, 1577));
+  assert.equal(state.officers.find(o => o.id === son.id).status, 'active');
+  assert.equal(Dynasty.reconcile(state).officers.filter(o => o.id === son.id).length, 1);
+  let deadParent = game(); deadParent.officers.push(officer('maeda_toshiie', '前田利家', 'oda', { birth: 1538, status: 'dead' }));
+  deadParent = Dynasty.advance(at(deadParent, 1562));
+  assert.equal(deadParent.officers.some(o => o.id === son.id), false);
+});
+
+test('age-based mortality, generation changes and records remain stable over a 240-year campaign', () => {
+  let state = Dynasty.initialize(game());
+  const initial = new Set(state.officers.map(o => o.id));
+  for (let year = 1561; year <= 1800; year++) {
+    state = Dynasty.advance(at(state, year));
+    for (const o of state.officers.filter(o => !['dead', 'unborn'].includes(o.status))) assert.ok(Dynasty.age(state, o) <= 100, `${o.name}: ${Dynasty.age(state, o)}`);
+    if (year % 20 === 0) assert.deepEqual(Dynasty.initialize(state), state, 'saved migration does not redraw lifespan or births');
+  }
+  assert.equal(state.officers.filter(o => initial.has(o.id) && o.status !== 'dead').length, 0);
+  assert.ok(state.tenka.dynasty.families.oda.history.length > 3);
+  assert.ok(state.officers.some(o => o.birth > 1700 && o.status === 'active'));
+  assert.ok(state.tenka.dynasty.deaths.every(d => d.age <= 100));
+});
+
+test('documented natural longevity allows Ieyasu late children while battle deaths still branch genealogy',()=>{
+ let state=Dynasty.initialize(game());
+ const father=state.officers.find(o=>o.id==='matsudaira_motoyasu');assert.equal(father.naturalDeathAge,73);
+ assert.equal(state.officers.find(o=>o.id==='oda_nobunaga').deathYear,undefined,'violent historical dates do not kill the player');
+ for(let year=1561;year<=1603;year++)state=Dynasty.advance(at(state,year));
+ for(const [id,birth] of [['tokugawa_yoshinao',1601],['tokugawa_yorinobu',1602],['tokugawa_yorifusa',1603]]){
+   const child=state.officers.find(o=>o.id===id);assert.ok(child,id);assert.equal(child.birth,birth);assert.equal(child.status,'child');assert.equal(child.fatherId,father.id);
+ }
+ assert.equal(state.officers.find(o=>o.id===father.id).status,'active');
+ let diverged=Dynasty.initialize(game());diverged=at(diverged,1600);
+ Dynasty.recordDeath(diverged,father.id,{cause:'battle'});
+ diverged=Dynasty.advance(at(diverged,1603));
+ assert.equal(diverged.officers.some(o=>o.id==='tokugawa_yorifusa'),false,'historical births do not force a killed parent to survive');
+ assert.equal(diverged.officers.find(o=>o.id===father.id).deathCause,'battle');
+});

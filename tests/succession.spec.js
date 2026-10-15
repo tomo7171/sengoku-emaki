@@ -80,3 +80,35 @@ test('historical births, coming of age and both sexes continue through thirty ye
  assert.equal(new Set(state.officers.map(o=>o.id)).size,state.officers.length);
  const count=state.officers.length;assert.equal(Game.migrate(state).officers.length,count);
 });
+
+test('a legacy campaign two centuries later reloads with finite lifespans and can recruit a new head',()=>{
+ const {Game,Dynasty}=runtime();let state=Game.newGame();
+ state.year=1770;state.season=0;state.turn=841;state.gold=4321;
+ state.tenka.estates.kiyosu.commerce=9;
+ assert.equal(Game.validate(state),true,'the legacy age problem is accepted by the original save shape');
+ state=persist(Game,state);
+ assert.equal(state.gold,4321);assert.equal(state.tenka.estates.kiyosu.commerce,9);
+ for(const o of state.officers){
+   assert.ok(Dynasty.age(state,o)<=100,`${o.name} does not remain centuries old`);
+   if(o.status==='dead')assert.equal(o.diedAtAge,o.deathYear-o.birth);
+ }
+ const head=state.officers.find(o=>o.id==='oda_nobunaga');assert.equal(head.status,'dead');assert.equal(head.deathCause,'natural');
+ assert.ok(head.historicalDeath);assert.equal(state.armies.kiyosu.commanderId,null);
+ const snapshot=clone(state);state=persist(Game,state);assert.deepEqual(clone(state),snapshot);
+ const hired=Dynasty.act(state,{type:'recruit'});assert.equal(hired.ok,true,hired.message);
+ state=persist(Game,hired.state);assert.ok(Dynasty.getView(state).family.head);
+});
+
+test('real seasonal natural mortality preserves designated succession and retainer children through saves',()=>{
+ const {Game,Dynasty}=runtime();let state=Game.newGame();
+ state.year=1584;state.season=0;state.turn=97;
+ state=Game.migrate(state);
+ const result=Dynasty.act(state,{type:'appointHeir',targetOfficerId:'oda_nobutada'});assert.equal(result.ok,true);state=result.state;
+ const head=state.officers.find(o=>o.id==='oda_nobunaga');head.naturalDeathAge=50;head.naturalDeathSeason=1;
+ state=Game.season(peace(state)).state;state=persist(Game,state);
+ const deceased=state.officers.find(o=>o.id===head.id);assert.equal(deceased.status,'dead');assert.equal(deceased.deathCause,'natural');assert.equal(deceased.diedAtAge,50);
+ assert.equal(Dynasty.getView(state).family.head.id,'oda_nobutada');
+ const retainerSon=state.officers.find(o=>o.id==='maeda_toshinaga');assert.equal(retainerSon.birth,1562);assert.equal(retainerSon.status,'active');assert.equal(retainerSon.fatherId,'maeda_toshiie');
+ assert.equal(state.officers.filter(o=>o.id===retainerSon.id).length,1);
+ assert.equal(Game.validate(state),true);
+});

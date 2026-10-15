@@ -6,15 +6,25 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
   const UNITS = ['ashigaru', 'archer', 'cavalry', 'firearm', 'navy'];
-  let configuredClans = {};
-  function configure(options = {}) { configuredClans = options.clans || {}; }
+  let configuredClans = {}, canonicalOfficers = {};
+  function configure(options = {}) {
+    configuredClans = options.clans || {};
+    canonicalOfficers = Object.fromEntries((options.officers || []).map(o => [o.id, o]));
+  }
   const clone = value => JSON.parse(JSON.stringify(value));
   const hash = value => { let n = 2166136261; for (const c of String(value)) n = Math.imul(n ^ c.charCodeAt(0), 16777619) >>> 0; return n; };
   const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-  const age = (s, o) => Number.isFinite(o?.birth) ? s.year - o.birth : 30;
+  const age = (s, o) => {
+    if (!Number.isFinite(o?.birth)) return null;
+    if (o.status === 'dead') {
+      if (Number.isFinite(o.diedAtAge)) return o.diedAtAge;
+      if (Number.isFinite(o.deathYear)) return Math.max(0, o.deathYear - o.birth);
+    }
+    return s.year - o.birth;
+  };
   const point = s => s.year * 4 + (s.season || 0);
   const alive = o => !!o && !['dead', 'unborn'].includes(o.status);
-  const adult = (s, o) => alive(o) && age(s, o) >= 15 && o.status === 'active';
+  const adult = (s, o) => alive(o) && age(s, o) != null && age(s, o) >= 15 && o.status === 'active';
   const owned = (s, clan) => (s.castles || []).filter(c => c.clan === clan);
   const officer = (s, id) => (s.officers || []).find(o => o.id === id);
   const female = o => (o?.gender || o?.sex) === 'female';
@@ -60,7 +70,48 @@
     ['chosokabe_morichika', '長宗我部盛親', 'chosokabe', 'chosokabe_motochika', 1575, 'male', [78, 82, 63, 65]],
     ['sanada_nobuyuki', '真田信之', 'sanada', 'sanada_masayuki', 1566, 'male', [84, 78, 86, 86]],
     ['sanada_nobushige', '真田信繁', 'sanada', 'sanada_masayuki', 1567, 'male', [91, 93, 88, 62]],
-    ['tokugawa_senhime', '千姫', 'matsudaira', 'tokugawa_hidetada', 1597, 'female', [47, 35, 73, 79]]
+    ['tokugawa_senhime', '千姫', 'matsudaira', 'tokugawa_hidetada', 1597, 'female', [47, 35, 73, 79]],
+    ['toyotomi_tsurumatsu', '豊臣鶴松', 'oda', 'kinoshita_tokichiro', 1589, 'male', [63, 58, 70, 74]],
+    ['toyotomi_hideyori', '豊臣秀頼', 'oda', 'kinoshita_tokichiro', 1593, 'male', [65, 58, 72, 78]],
+    ['maeda_toshinaga', '前田利長', 'oda', 'maeda_toshiie', 1562, 'male', [78, 70, 77, 85]],
+    ['maeda_toshimasa', '前田利政', 'oda', 'maeda_toshiie', 1578, 'male', [70, 73, 69, 72]],
+    ['maeda_toshitsune', '前田利常', 'oda', 'maeda_toshiie', 1594, 'male', [74, 63, 83, 91]],
+    ['maeda_gohime', '豪姫', 'oda', 'maeda_toshiie', 1574, 'female', [48, 38, 75, 78]],
+    ['ikeda_terumasa', '池田輝政', 'oda', 'ikeda_tsuneoki', 1565, 'male', [84, 78, 78, 86]],
+    ['takenaka_shigekado', '竹中重門', 'saito', 'takenaka_shigeharu', 1573, 'male', [69, 58, 80, 76]],
+    ['niwa_nagashige', '丹羽長重', 'oda', 'niwa_nagahide', 1571, 'male', [76, 77, 71, 77]],
+    ['mori_nagayoshi', '森長可', 'oda', 'mori_yoshinari', 1558, 'male', [76, 90, 58, 56]],
+    ['mori_naritoshi', '森成利', 'oda', 'mori_yoshinari', 1565, 'male', [61, 65, 70, 69]],
+    ['honda_tadamasa', '本多忠政', 'matsudaira', 'honda_tadakatsu', 1575, 'male', [78, 80, 70, 76]],
+    ['honda_tadatomo', '本多忠朝', 'matsudaira', 'honda_tadakatsu', 1582, 'male', [76, 85, 60, 61]],
+    ['honda_masazumi', '本多正純', 'matsudaira', 'honda_masanobu', 1565, 'male', [61, 43, 86, 87]],
+    ['sakai_ietsugu', '酒井家次', 'matsudaira', 'sakai_tadatsugu', 1564, 'male', [76, 72, 72, 78]],
+    ['ishikawa_yasunaga', '石川康長', 'matsudaira', 'ishikawa_kazumasa', 1554, 'male', [66, 62, 68, 74]],
+    ['torii_tadamasa', '鳥居忠政', 'matsudaira', 'torii_mototada', 1567, 'male', [76, 73, 66, 77]],
+    ['okubo_tadachika', '大久保忠隣', 'matsudaira', 'okubo_tadayo', 1553, 'male', [75, 72, 71, 80]],
+    ['sakakibara_yasukatsu', '榊原康勝', 'matsudaira', 'sakakibara_yasumasa', 1590, 'male', [73, 77, 61, 64]],
+    ['hattori_masatsugu', '服部正就', 'matsudaira', 'hattori_masanari', 1565, 'male', [66, 68, 78, 60]],
+    ['hosokawa_tadaoki', '細川忠興', 'ashikaga', 'hosokawa_fujitaka', 1563, 'male', [83, 82, 77, 79]],
+    ['hosokawa_tadatoshi', '細川忠利', 'ashikaga', 'hosokawa_tadaoki', 1586, 'male', [77, 72, 77, 86]],
+    ['kikkawa_hiroie', '吉川広家', 'mori', 'kikkawa_motoharu', 1561, 'male', [79, 78, 79, 77]],
+    ['mori_hidenari', '毛利秀就', 'mori', 'mori_terumoto', 1595, 'male', [66, 59, 69, 75]],
+    ['ukita_hideie', '宇喜多秀家', 'ukita', 'ukita_naoie', 1572, 'male', [80, 76, 71, 75]],
+    ['nabeshima_katsushige', '鍋島勝茂', 'ryuzoji', 'nabeshima_naoshige', 1580, 'male', [81, 77, 77, 83]],
+    ['ryuzoji_masaie', '龍造寺政家', 'ryuzoji', 'ryuzoji_takanobu', 1556, 'male', [58, 53, 62, 65]],
+    ['tachibana_ginchiyo', '立花誾千代', 'otomo', 'bekki_akitsura', 1569, 'female', [76, 73, 71, 69]],
+    ['satake_yoshinobu', '佐竹義宣', 'satake', 'satake_yoshishige', 1570, 'male', [83, 78, 79, 85]],
+    ['mogami_yoshiyasu', '最上義康', 'mogami', 'mogami_yoshiaki', 1575, 'male', [76, 74, 70, 72]],
+    ['mogami_komahime', '駒姫', 'mogami', 'mogami_yoshiaki', 1581, 'female', [46, 35, 68, 74]],
+    ['soma_yoshitane', '相馬義胤', 'soma', 'soma_moritane', 1548, 'male', [76, 80, 68, 72]],
+    ['uesugi_kagekatsu', '上杉景勝', 'uesugi', 'nagao_masakage', 1556, 'male', [89, 85, 77, 81]],
+    ['azai_chacha', '茶々', 'azai', 'azai_nagamasa', 1569, 'female', [48, 39, 71, 77]],
+    ['azai_hatsu', '初', 'azai', 'azai_nagamasa', 1570, 'female', [48, 36, 73, 78]],
+    ['azai_go', '江', 'azai', 'azai_nagamasa', 1573, 'female', [48, 37, 73, 80]],
+    ['ando_sanesue', '安東実季', 'ando', 'ando_chikasue', 1576, 'male', [76, 74, 72, 77]],
+    ['sagara_yorifusa', '相良頼房', 'sagara', 'sagara_yoshihi', 1574, 'male', [73, 71, 69, 77]],
+    ['omura_yoshiaki', '大村喜前', 'omura', 'omura_sumitada', 1568, 'male', [69, 66, 70, 76]],
+    ['arima_harunobu', '有馬晴信', 'arima', 'arima_yoshisada', 1567, 'male', [74, 71, 72, 79]],
+    ['sho_ei', '尚永王', 'ryukyu', 'sho_gen', 1559, 'male', [59, 40, 73, 77]]
   ].map(([id, name, clan, fatherId, birth, gender, stats]) => ({ id, name, clan, fatherId, birth, gender, stats }));
   // Genealogy of people already in the scenario, including sons adopted into other surnames.
   const EXISTING_FATHERS = {
@@ -74,10 +125,104 @@
   const ALIASES = { takeda_harunobu: ['takeda_shingen'], date_sanemoto: ['date_sanezane'], oda_nobuo: ['oda_nobukatsu'], yuki_hideyasu: ['matsudaira_hideyasu', 'tokugawa_hideyasu'], sanada_nobushige: ['sanada_yukimura'], otomo_sorin: ['otomo_yoshishige'] };
   const historicalPerson = (s, spec) => s.officers.find(o => o.id === spec.id || o.name === spec.name || (ALIASES[spec.id] || []).includes(o.id));
   const fatherOf = (s, spec) => officer(s, spec.fatherId) || s.officers.find(o => (ALIASES[spec.fatherId] || []).includes(o.id));
+  // Only selected natural deaths are anchors. Battle deaths, suicides, executions and
+  // assassinations are deliberately excluded: they must follow this campaign's events.
+  const NATURAL_DEATH_YEARS = {
+    matsudaira_motoyasu: 1616, kinoshita_tokichiro: 1598, maeda_toshiie: 1599,
+    mori_motonari: 1571, takeda_harunobu: 1573, nagao_kagetora: 1578,
+    hojo_ujiyasu: 1571, hojo_genan: 1589, niwa_nagahide: 1585,
+    honda_tadakatsu: 1610, honda_masanobu: 1616, sakai_tadatsugu: 1596,
+    shimazu_takahisa: 1571, shimazu_yoshihisa: 1611, shimazu_yoshihiro: 1619,
+    date_tanemune: 1565, date_harumune: 1578, date_masamune: 1636,
+    sanada_masayuki: 1611, sanada_nobuyuki: 1658,
+    hosokawa_fujitaka: 1610, hosokawa_tadaoki: 1645,
+    chosokabe_motochika: 1599, otomo_sorin: 1587, otomo_yoshishige: 1587,
+    nabeshima_naoshige: 1618, mori_terumoto: 1625, tokugawa_hidetada: 1632
+  };
+  // Adult longevity is modelled separately from life expectancy at birth. Disease risk
+  // rises with age; the scenario's living elders have already survived to spring 1560.
+  // A stable draw makes saves/reloads and UI reconciliation independent of random rolls.
+  function naturalLifespan(o) {
+    const observedAge = o.origin === 'fictional' ? 15 : Math.max(15, 1560 - o.birth);
+    const documentedYear = NATURAL_DEATH_YEARS[o.id];
+    const documentedAge = documentedYear - o.birth;
+    if (o.origin !== 'fictional' && documentedAge >= observedAge && documentedAge >= 45 && documentedAge <= 100) return documentedAge;
+    const childAges = o.origin === 'fictional' ? [] : HISTORICAL.filter(spec => spec.fatherId === o.id || (ALIASES[spec.fatherId] || []).includes(o.id)).map(spec => spec.birth - o.birth + 1).filter(years => years >= 15 && years <= 90);
+    const knownLeader = o.origin !== 'fictional' && Object.values(configuredClans).some(c => (c.leader || '').replace(/\s/g, '') === o.name.replace(/\s/g, ''));
+    const minimum = Math.max(45, observedAge + 1, knownLeader ? 60 : 45, ...childAges);
+    const draw = hash(`lifespan-v1:${o.id}`) / 4294967296;
+    let survival = 1;
+    for (let years = minimum; years < 100; years++) {
+      const hazard = years < 55 ? .01 : years < 65 ? .025 : years < 75 ? .055 : years < 85 ? .12 : years < 95 ? .25 : .5;
+      survival *= 1 - hazard;
+      if (draw > survival) return years;
+    }
+    return 100;
+  }
+  function normalizeDates(s, o) {
+    const canonical = canonicalOfficers[o.id];
+    const child = HISTORICAL.find(spec => spec.id === o.id || (ALIASES[spec.id] || []).includes(o.id));
+    if (o.origin !== 'fictional' && Number.isInteger(canonical?.birth)) {
+      o.birth = canonical.birth; delete o.birthEstimated;
+    }
+    if (child) { o.birth = child.birth; delete o.birthEstimated; }
+    if (!Number.isInteger(o.birth)) {
+      // Unknown historical dates remain explicitly marked as estimates; never subtract null.
+      const reference = o.origin === 'fictional' ? s.year : 1560;
+      o.birth = reference - (28 + hash(`estimated-birth:${o.id}`) % 28);
+      o.birthEstimated = true;
+    }
+    if (o.historicalDeath == null && o.origin !== 'fictional' && Number.isInteger(canonical?.death ?? (!o.deathYear ? o.death : null))) o.historicalDeath = canonical?.death ?? o.death;
+    if (!Number.isInteger(o.naturalDeathAge) || o.naturalDeathAge < 45 || o.naturalDeathAge > 100) o.naturalDeathAge = naturalLifespan(o);
+    if (!Number.isInteger(o.naturalDeathSeason) || o.naturalDeathSeason < 0 || o.naturalDeathSeason > 3) o.naturalDeathSeason = hash(`death-season:${o.id}`) % 4;
+    if (o.status === 'dead') {
+      if (!Number.isInteger(o.deathYear) || o.deathYear < o.birth || o.deathYear > s.year || o.deathYear - o.birth > 100) {
+        // Older saves did not distinguish a historical reference date from actual death.
+        const reference = o.death;
+        o.deathYear = Number.isInteger(reference) && reference >= o.birth && reference <= s.year && reference - o.birth <= 100 ? reference : Math.min(s.year, o.birth + o.naturalDeathAge);
+        o.deathDateEstimated = true;
+      }
+      o.diedAtAge = Math.max(0, o.deathYear - o.birth);
+      o.deathCause ||= 'unknown';
+      o.death = o.deathYear;
+    }
+  }
+  function recordDeath(s, person, details = {}) {
+    const o = typeof person === 'string' ? officer(s, person) : person;
+    if (!o) return null;
+    if (o.status === 'dead' && Number.isInteger(o.deathYear) && !details.override) return o;
+    if (o.historicalDeath == null && o.origin !== 'fictional' && !o.deathYear && Number.isInteger(o.death)) o.historicalDeath = o.death;
+    const year = Number.isInteger(details.year) ? details.year : s.year;
+    o.deathYear = year; o.death = year;
+    o.deathSeason = Number.isInteger(details.season) ? details.season : s.season || 0;
+    o.diedAtAge = Number.isFinite(details.age) ? details.age : Math.max(0, year - o.birth);
+    o.deathCause = details.cause || 'unknown';
+    if (details.estimated) o.deathDateEstimated = true;
+    else delete o.deathDateEstimated;
+    Object.assign(o, { status: 'dead', castleId: null, capturedBy: null });
+    for (const army of Object.values(s.armies || {})) if (army.commanderId === o.id) army.commanderId = null;
+    if (s.tenka?.assignments) delete s.tenka.assignments[o.id];
+    const entry = { officerId: o.id, name: o.name, clan: o.clan, year, season: o.deathSeason, age: o.diedAtAge, cause: o.deathCause, estimated: !!details.estimated };
+    if (s.tenka?.dynasty) {
+      const deaths = s.tenka.dynasty.deaths ||= [];
+      if (!deaths.some(d => d.officerId === o.id)) deaths.push(entry);
+    }
+    return o;
+  }
+  function naturalDeaths(s, migrationOnly = false) {
+    for (const o of s.officers) {
+      if (!alive(o)) continue;
+      const years = s.year - o.birth;
+      const due = point(s) >= (o.birth + o.naturalDeathAge) * 4 + o.naturalDeathSeason;
+      if (!due || (migrationOnly && years < 100)) continue;
+      recordDeath(s, o, { cause: 'natural', year: o.birth + o.naturalDeathAge, season: o.naturalDeathSeason, estimated: migrationOnly });
+      if (o.clan === s.playerClan) log(s, '家臣の死去', `${o.name}が${o.deathYear}年に病・老衰で亡くなりました（享年${o.diedAtAge}歳）。${migrationOnly ? '旧セーブの寿命未設定を補正しました。' : '世継ぎ・後見人が家督と領国を支えます。'}`);
+    }
+  }
   function createOfficer(s, details) {
     const seed = hash(details.id), stats = details.stats || [49 + seed % 25, 46 + (seed >>> 4) % 28, 48 + (seed >>> 8) % 26, 51 + (seed >>> 12) % 24];
     const birth = details.birth, gender = details.gender || 'male';
-    return {
+    const person = {
       id: details.id, name: details.name, clan: details.clan, castleId: details.castleId || null,
       birth, currentYear: s.year, death: null, leadership: stats[0], valor: stats[1], intelligence: stats[2], politics: stats[3],
       aptitudes: Object.fromEntries(UNITS.map((unit, i) => [unit, 2 + (hash(`${details.id}:${i}`) % 3)])),
@@ -87,6 +232,8 @@
       biography: details.biography || 'ゲーム内で登場した架空の在地武将。史実の人物とは区別する。',
       ...details, gender, sex: gender
     };
+    normalizeDates(s, person);
+    return person;
   }
   function touchOfficer(s, o) {
     o.currentYear = s.year;
@@ -110,11 +257,12 @@
     const s = clone(input);
     s.officers ||= []; s.castles ||= []; s.tenka ||= {}; s.tenka.loyalty ||= {}; s.tenka.assignments ||= {};
     const old = s.tenka.dynasty || {};
-    s.tenka.dynasty = { version: 1, families: {}, events: [], marriages: [], recruitment: {}, ...old };
+    s.tenka.dynasty = { version: 2, families: {}, events: [], marriages: [], deaths: [], recruitment: {}, ...old };
     const d = s.tenka.dynasty;
     for (const key of ['families', 'recruitment']) if (!d[key] || typeof d[key] !== 'object' || Array.isArray(d[key])) d[key] = {};
-    for (const key of ['events', 'marriages']) if (!Array.isArray(d[key])) d[key] = [];
-    for (const o of s.officers) touchOfficer(s, o);
+    for (const key of ['events', 'marriages', 'deaths']) if (!Array.isArray(d[key])) d[key] = [];
+    d.version = 2;
+    for (const o of s.officers) { normalizeDates(s, o); touchOfficer(s, o); }
     for (const [childId, fatherId] of Object.entries(EXISTING_FATHERS)) {
       const child = officer(s, childId);
       const father = officer(s, fatherId) || s.officers.find(o => (ALIASES[fatherId] || []).includes(o.id));
@@ -147,6 +295,7 @@
       const eventId = `historical-birth:${spec.id}`, existing = historicalPerson(s, spec), father = fatherOf(s, spec);
       const clan = father?.clan || spec.clan;
       if (existing) {
+        existing.birth = spec.birth; delete existing.birthEstimated;
         existing.fatherId ||= father?.id || spec.fatherId; existing.isKin ||= !!father?.isKin;
         existing.gender = spec.gender; existing.sex = spec.gender;
         const f = d.families[existing.clan]; if (f && existing.isKin && !f.kinIds.includes(existing.id)) f.kinIds.push(existing.id);
@@ -160,7 +309,7 @@
         origin: 'historical', isKin: !!father.isKin, biography: `${spec.name}。生年${spec.birth}年を基準に登場する史実人物。親の生存・在籍に応じて出生し、十五歳で元服する。能力はゲーム用の評価。` });
       s.officers.push(o); s.tenka.loyalty[o.id] = 90;
       const f = d.families[clan]; if (f && o.isKin && !f.kinIds.includes(o.id)) f.kinIds.push(o.id);
-      if (d.initialized && clan === s.playerClan) log(s, '一門に新しい命', `${o.name}（史実の生年 ${o.birth}年）が誕生しました。${female(o) ? '姫として一門に加わり、成人後に婚姻を結べます。' : '一門の子として育ち、十五歳で政務と合戦を担います。'}`);
+      if (d.initialized && clan === s.playerClan) log(s, o.isKin ? '一門に新しい命' : '家臣の家に新しい命', `${father.name}の子、${o.name}（史実の生年 ${o.birth}年）が誕生しました。${female(o) ? '姫として育ちます。' : '十五歳で元服し、政務と合戦を担います。'}`);
     }
   }
   function kinSort(s, a, b) {
@@ -209,7 +358,7 @@
     }
   }
   function initialize(input) {
-    const s = prepare(input); addHistorical(s); updateFamilies(s); s.tenka.dynasty.initialized = true; return s;
+    const s = prepare(input); naturalDeaths(s, true); addHistorical(s); updateFamilies(s); s.tenka.dynasty.initialized = true; return s;
   }
   function reconcile(input) { return initialize(input); }
   function proceduralBirths(s) {
@@ -253,10 +402,11 @@
     }
   }
   function advance(input, previous) {
-    const s = initialize(input), d = s.tenka.dynasty;
-    if (s.gameOver || d.lastAdvancedTurn === s.turn) return s;
+    const s = prepare(input), d = s.tenka.dynasty;
+    if (s.gameOver || d.lastAdvancedTurn === s.turn) return initialize(s);
     d.lastAdvancedTurn = s.turn;
-    proceduralBirths(s); updateFamilies(s); renewMarriages(s); return s;
+    naturalDeaths(s); addHistorical(s); updateFamilies(s);
+    proceduralBirths(s); updateFamilies(s); renewMarriages(s); d.initialized = true; return s;
   }
   function candidate(s, clan = s.playerClan) {
     const rec = s.tenka.dynasty.recruitment[clan], sequence = rec?.turn === s.turn ? rec.count || 0 : 0;
@@ -358,8 +508,9 @@
       recruits: owned(s, clan).length ? recruits(s) : [],
       eligibleHeirs: own.filter(o => validHeir(s, o, clan, f.headId)).map(o => viewOfficer(s, o)),
       eligibleRegents: own.filter(o => adult(s, o) && o.id !== f.headId).map(o => viewOfficer(s, o)),
-      marriageClans: marriageTargets(s), upcoming: upcoming.sort((a, b) => a.year - b.year || a.id.localeCompare(b.id))
+      marriageClans: marriageTargets(s), deaths: d.deaths.filter(o => o.clan === clan).slice(-40).reverse(),
+      upcoming: upcoming.sort((a, b) => a.year - b.year || a.id.localeCompare(b.id))
     };
   }
-  return { configure, initialize, advance, reconcile, act, getView, HISTORICAL };
+  return { configure, initialize, advance, reconcile, act, getView, age, recordDeath, HISTORICAL };
 });
