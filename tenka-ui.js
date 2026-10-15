@@ -203,14 +203,44 @@ function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,compact
   )
  );
 }
-function Tactics({battle,onBattle,selectedUnitId}){
- const side=battle.playerSide||'attacker';const unit=battle.units.find(u=>u.id===selectedUnitId&&u.side===side);
- const [message,setMessage]=React.useState('');
- if(!unit)return null;
- const formation=(key)=>{const result=global.TenkaTactics.formation(battle,unit.id,key);if(result?.ok===false)setMessage(result.message);else{onBattle(result.battle||result);setMessage('陣形を変更しました。');}};
- const ambush=()=>{const result=global.TenkaTactics.ambush(battle,unit.id);if(result?.ok===false)setMessage(result.message);else{onBattle(result.battle||result);setMessage(result.message||'伏兵を配置しました。');}};
- return h('div',{className:'tenka-tactical-doctrine'},h('span',null,battle.playerSide==='defender'?'籠城軍の配置':'陣形と伏兵'),h('label',null,'陣形 ',h('select',{'aria-label':'部隊の陣形',value:unit.formation||'line',onChange:e=>formation(e.target.value)},[['line','横陣'],['wedge','魚鱗'],['defensive','方円'],['loose','散開']].map(([id,label])=>h('option',{value:id,key:id},label)))),h('button',{onClick:ambush,disabled:battle.phase!=='deployment'},unit.ambush?'伏兵を解除':'伏兵を配置'),h('small',{role:'status'},message||'森林・丘陵での伏兵は初撃を強化。陣形により移動と攻防が変化します。'),battle.supply&&h('small',null,'自軍の兵糧：'+format(Math.max(0,battle.supply[side].initial-battle.supply[side].consumed))+' 石 ／ 合戦中の消費 '+format(battle.supply[side].consumed)+' 石'));
+function Tactics({battle,onBattle,selectedUnitId,deploymentTool,onDeploymentToolChange,selectedStructureId,onSelectedStructureChange,placementRotation=0,onPlacementRotationChange}){
+ const tactics=global.TenkaTactics,side=battle.playerSide||'attacker',deploying=battle.phase==='deployment';
+ const unit=battle.units.find(u=>u.id===selectedUnitId&&u.side===side&&u.troops>0);
+ const [message,setMessage]=React.useState(''),[localTool,setLocalTool]=React.useState('unit'),[draft,setDraft]=React.useState(null);
+ const tool=deploymentTool||localTool;
+ const works=(battle.fortifications||[]).filter(s=>s.side===side&&s.hp>0);
+ const selected=works.find(s=>s.id===selectedStructureId),kind=selected?.kind||(tool==='camp'?'camp':'palisade');
+ const zone=tactics.deploymentZone(battle),budget=tactics.fortificationBudget?.(battle);
+ const key=selected?.id||'new:'+tool;
+ const defaultX=selected?.x??Math.round((zone.xMin+zone.xMax)/2),defaultZ=selected?.z??Math.round((zone.zMin+zone.zMax)/2);
+ const x=draft?.key===key?draft.x:String(defaultX),z=draft?.key===key?draft.z:String(defaultZ);
+ const rotation=selected?.rotation??placementRotation;
+ const result=(outcome)=>{if(outcome?.ok===false){setMessage(outcome.message);return false;}if(outcome?.battle){onBattle(outcome.battle);setMessage(outcome.message||'布陣を変更しました。');setDraft(null);return true;}return false;};
+ const selectTool=(next)=>{setLocalTool(next);onDeploymentToolChange?.(next);onSelectedStructureChange?.(null);setDraft(null);setMessage(next==='unit'?'味方部隊を選び、戦場の地面をクリックして配置します。':'戦場の地面をクリックして'+(next==='camp'?'本陣':'木柵')+'を設置します。');};
+ const selectWork=(id)=>{const work=works.find(s=>s.id===id);setDraft(null);if(work){setLocalTool(work.kind);onDeploymentToolChange?.(work.kind);onPlacementRotationChange?.(work.rotation||0);}onSelectedStructureChange?.(work?.id||null);setMessage(work?'戦場の地面をクリックするか、座標を指定して移設できます。':'新しい'+(tool==='camp'?'本陣':'木柵')+'を設置します。');};
+ const coordinate=(axis,value)=>setDraft({key,x,z,[axis]:value});
+ const place=(e)=>{e?.preventDefault();if(x.trim()===''||z.trim()===''){setMessage('東西・南北の座標を両方入力してください。');return;}const command={x:Number(x),z:Number(z),rotation};if(selected)result(tactics.moveFortification(battle,{...command,id:selected.id}));else{const before=new Set(works.map(s=>s.id)),outcome=tactics.placeFortification(battle,{...command,kind});if(result(outcome)){const placed=(outcome.battle.fortifications||[]).find(s=>s.side===side&&!before.has(s.id));if(placed)onSelectedStructureChange?.(placed.id);}}};
+ const rotate=(value)=>{const angle=Number(value);if(!selected||result(tactics.moveFortification(battle,{id:selected.id,x:selected.x,z:selected.z,rotation:angle})))onPlacementRotationChange?.(angle);};
+ const remove=()=>{if(selected&&result(tactics.removeFortification(battle,selected.id)))onSelectedStructureChange?.(null);};
+ const formation=(value)=>result(tactics.formation(battle,unit.id,value));
+ const ambush=()=>result(tactics.ambush(battle,unit.id));
+ if(!deploying&&!unit)return null;
+ return h('section',{className:'tenka-tactical-doctrine'+(deploying?' tenka-deployment':''),'aria-label':deploying?'部隊と陣・柵の自由配置':'部隊の陣形と伏兵'},
+  deploying&&h(React.Fragment,null,
+   h('div',{className:'tenka-deployment-heading'},h('strong',null,side==='defender'?'籠城軍の布陣':battle.mode==='siege'?'攻城軍の布陣':'野戦の布陣'),h('small',null,'合戦開始前に自由に変更できます')),
+   h('div',{className:'tenka-placement-tools',role:'group','aria-label':'戦場に配置するもの'},[['unit','部隊'],['camp','本陣'],['palisade','木柵']].map(([id,name])=>h('button',{type:'button',key:id,'aria-pressed':tool===id,onClick:()=>selectTool(id)},name))),
+   h('p',{className:'tenka-placement-help'},tool==='unit'?'味方の部隊を選択し、戦場の地面をクリック／タップして移動。座標と兵科は部隊設定でも変更できます。':selected?'選択した'+(selected.kind==='camp'?'本陣':'木柵')+'を地面のクリック／タップで移設。向き・座標も変更できます。':'戦場の地面をクリック／タップして'+(tool==='camp'?'本陣':'木柵')+'を設置。既設の陣・柵は選択して移設・撤去できます。'),
+   h('div',{className:'tenka-placement-budget','aria-label':'設営できる数'},budget&&h('span',null,'本陣 '+budget.camp.used+' / '+budget.camp.limit+'　木柵 '+budget.palisade.used+' / '+budget.palisade.limit),h('small',null,'配置範囲　東西 '+zone.xMin+'～'+zone.xMax+' ／ 南北 '+zone.zMin+'～'+zone.zMax)),
+   tool!=='unit'&&h('div',{className:'tenka-fieldworks-editor'},
+    h('p',{className:'tenka-fieldworks-effect'},tactics.fortificationTypes?.[kind]?.description||''),
+    h('label',{className:'tenka-fieldworks-picker'},h('span',null,'設営済みの陣・柵'),h('select',{'aria-label':'編集する陣・柵',value:selected?.id||'',onChange:e=>selectWork(e.target.value)},h('option',{value:''},'新しく設置する'),works.map((work,index)=>h('option',{key:work.id,value:work.id},(work.kind==='camp'?'本陣':'木柵')+' '+(index+1)+' ／ 東西 '+work.x+'・南北 '+work.z)))),
+    h('form',{className:'tenka-fieldworks-coordinates',onSubmit:place},h('label',null,'東西 X',h('input',{type:'number',step:'any',min:zone.xMin,max:zone.xMax,'aria-label':'陣・柵の東西座標',value:x,onChange:e=>coordinate('x',e.target.value)})),h('label',null,'南北 Z',h('input',{type:'number',step:'any',min:zone.zMin,max:zone.zMax,'aria-label':'陣・柵の南北座標',value:z,onChange:e=>coordinate('z',e.target.value)})),h('label',null,'向き',h('select',{'aria-label':'陣・柵の向き',value:rotation,onChange:e=>rotate(e.target.value)},[0,30,45,60,90,120,135,150,180,210,225,240,270,300,315,330].map(angle=>h('option',{key:angle,value:angle},angle+'°')))),h('button',{type:'submit',disabled:!selected&&budget?.[kind]?.remaining===0},selected?'この座標へ移設':'この座標に設置'),selected&&h('button',{type:'button',className:'tenka-remove-work',onClick:remove},'撤去する')),
+    h('small',null,'水面・城郭・部隊と重なる場所には設営できません。城壁や城門など既存の城の施設は移設できません。'))),
+  unit&&h('div',{className:'tenka-unit-doctrine'},h('strong',null,(unit.commanderName||'組頭')+'隊 · '+(unitNames[unit.type]||'部隊')),h('label',null,'陣形 ',h('select',{'aria-label':'部隊の陣形',value:unit.formation||'line',onChange:e=>formation(e.target.value)},[['line','横陣'],['wedge','魚鱗'],['defensive','方円'],['loose','散開']].map(([id,label])=>h('option',{value:id,key:id},label)))),h('button',{type:'button',onClick:ambush,disabled:!deploying},unit.ambush?'伏兵を解除':'伏兵を配置')),
+  h('small',{className:'tenka-placement-status',role:'status','aria-live':'polite'},message||(deploying?'配置を終えたら「戦闘開始」を押してください。':unit?'森林・丘陵での伏兵は初撃を強化。陣形により移動と攻防が変化します。':'')),
+  battle.supply&&h('small',{className:'tenka-supply-note'},'自軍の兵糧：'+format(Math.max(0,battle.supply[side].initial-battle.supply[side].consumed))+' 石 ／ 合戦中の消費 '+format(battle.supply[side].consumed)+' 石'));
 }
+
 return {Council,Tactics,Portrait,BattleAftermath};
 }
 global.TenkaUI={create,era,battleAftermathView};

@@ -17,7 +17,7 @@ assert.ok(render, 'find the application render without replacing game rules');
 script = script.slice(0, render.index) + '})();';
 const context = vm.createContext({ console, setTimeout, clearTimeout, performance, URL });
 context.window = context;
-for (const filename of ['tenka-portraits.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js']) {
+for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, filename), 'utf8'), context, { filename });
 }
 vm.runInContext(script, context, { filename: 'index.inline.js' });
@@ -214,4 +214,136 @@ test('combat supply exhaustion lowers morale and settles without negative food',
   const settled = Game.settle(state, battle);
   assert.equal(settled.ok, true, settled.message); valid(settled.state);
   assert.equal(settled.state.food, 0);
+});
+
+function placeAnywhere(input, kind, rotation = 0) {
+  const zone = Tactics.deploymentZone(input);
+  for (let z = zone.zMin + 5; z <= zone.zMax - 5; z += 4) for (let x = zone.xMin + 5; x <= zone.xMax - 5; x += 4) {
+    const response = Tactics.placeFortification(input, { kind, x, z, rotation });
+    if (response.ok) return response;
+  }
+  assert.fail(`the ${input.defending ? 'defender' : input.mode} deployment area needs usable space for ${kind}`);
+}
+
+for (const mode of ['field', 'siege', 'defense']) {
+  test(`${mode}: freely placed, rotated, moved and removed fortifications replay and settle without changing castle objectives`, () => {
+    const state = mode === 'defense' ? defenseState(true) : Game.newGame();
+    let battle = mode === 'defense' ? Tactics.createDefense(state) : Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode });
+    const snapshot = clone(state), originalStructures = clone(battle.structures), objective = clone(battle.captureZone);
+    let response = placeAnywhere(battle, 'palisade', 30);
+    assert.equal(response.ok, true); battle = response.battle;
+    const fence = battle.fortifications.find(item => item.id === response.fortificationId);
+    response = Tactics.moveFortification(battle, { id: fence.id, rotation: 90 });
+    assert.equal(response.ok, true, response.message); battle = response.battle;
+    response = Tactics.removeFortification(battle, fence.id);
+    assert.equal(response.ok, true); battle = response.battle;
+    assert.equal(Tactics.fortificationBudget(battle).palisade.remaining, 8, 'removal returns the limited construction slot');
+    battle = placeAnywhere(battle, 'palisade', 0).battle;
+    battle = placeAnywhere(battle, 'camp', 45).battle;
+    assert.equal(battle.fortifications.length, 2);
+    assert.deepEqual(clone(battle.structures), originalStructures, 'fieldworks cannot become a fake castle gate or capture objective');
+    assert.deepEqual(clone(battle.captureZone), objective);
+    const own = battle.units.find(unit => unit.side === battle.playerSide);
+    assert.equal(Tactics.deploy(battle, { unitId: own.id, x: own.x, z: own.z }).ok, true, 'troops remain freely deployable beside the new facilities');
+    const finished = finish(battle);
+    assert.ok(Tactics.verify(state, finished), 'the actual finished battle is reconstructed from placement commands');
+    const tampered = clone(finished);
+    tampered.fortifications[0].rotation++;
+    assert.equal(Tactics.verify(state, tampered), null, 'changed fieldwork geometry invalidates the battle ledger');
+    const changedLedger = clone(finished);
+    changedLedger.ledger.findLast(record => record.kind === 'fieldwork-place').command.x++;
+    assert.equal(Tactics.verify(state, changedLedger), null, 'the recorded position cannot be edited after combat');
+    const settled = Game.settle(state, finished);
+    assert.equal(settled.ok, true, settled.message); valid(settled.state);
+    assert.deepEqual(clone(state), snapshot);
+    assert.equal(Tactics.placeFortification(finished, { kind: 'camp', x: 30, z: 30 }).ok, false, 'buildings cannot be spawned after combat');
+    assert.equal(Tactics.moveFortification(finished, { id: finished.fortifications[0].id, x: 20 }).ok, false);
+    assert.equal(Tactics.removeFortification(finished, finished.fortifications[0].id).ok, false);
+  });
+}
+
+test('fortification deployment validates complete rotated footprints, water, occupied troops, ownership and budgets', () => {
+  const state = Game.newGame();
+  let battle = Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field' });
+  const snapshot = clone(battle), unit = battle.units.find(item => item.side === 'attacker');
+  for (const command of [
+    { kind: 'hall', x: -30, z: 20 },
+    { kind: 'palisade', x: NaN, z: 20 },
+    { kind: 'camp', x: 20, z: 20, rotation: Infinity },
+    { kind: 'palisade', x: 42, z: 15, rotation: 45 },
+    { kind: 'palisade', x: 0, z: -20 },
+    { kind: 'camp', x: unit.x, z: unit.z },
+  ]) assert.equal(Tactics.placeFortification(battle, command).ok, false);
+  assert.deepEqual(clone(battle), snapshot, 'rejected commands never mutate the deployment');
+  const waterBattle = clone(battle);
+  waterBattle.layout.water.push({ type: 'moat', polygon: [[-30, 19], [-20, 19], [-20, 21], [-30, 21]] });
+  assert.equal(Tactics.placeFortification(waterBattle, { kind: 'palisade', x: -25, z: 17, rotation: 90 }).ok, false, 'a footprint reaching into water is rejected although its center is dry');
+  for (let count = 0; count < 8; count++) battle = placeAnywhere(battle, 'palisade').battle;
+  assert.equal(Tactics.fortificationBudget(battle).palisade.remaining, 0);
+  assert.equal(Tactics.placeFortification(battle, { kind: 'palisade', x: 35, z: 35 }).ok, false);
+  for (let count = 0; count < 2; count++) battle = placeAnywhere(battle, 'camp').battle;
+  assert.equal(Tactics.fortificationBudget(battle).camp.remaining, 0);
+  assert.equal(Tactics.placeFortification(battle, { kind: 'camp', x: 35, z: 35 }).ok, false);
+  assert.equal(Tactics.moveFortification(battle, { id: 'castle-gate', x: 30, z: 30 }).ok, false);
+  assert.equal(Tactics.removeFortification(battle, 'castle-gate').ok, false);
+  const fence = battle.fortifications.find(item => item.kind === 'palisade');
+  assert.equal(Tactics.deploy(battle, { unitId: unit.id, x: fence.x, z: fence.z }).ok, false, 'troops cannot start inside a fence');
+  const moved = Tactics.moveFortification(battle, { id: fence.id, rotation: 360 });
+  assert.equal(moved.ok, true); assert.equal(moved.battle.fortifications[0].rotation, 0);
+});
+
+test('palisades physically stop and absorb enemy attacks, camps protect and rally, and destroyed fences open the route', () => {
+  const state = Game.newGame();
+  let battle = Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field' });
+  let response = Tactics.placeFortification(battle, { kind: 'palisade', x: 0, z: 20, rotation: 0 });
+  assert.equal(response.ok, true); battle = response.battle;
+  response = Tactics.placeFortification(battle, { kind: 'camp', x: 0, z: 34, rotation: 0 });
+  assert.equal(response.ok, true); battle = Game.startBattle(response.battle);
+  const attacker = battle.units.find(unit => unit.side === 'attacker' && unit.type === 'ashigaru');
+  const defender = battle.units.find(unit => unit.side === 'defender' && unit.type === 'ashigaru');
+  // Isolate the actual production move/damage hooks to measure the obstacle and
+  // aura without outcome noise from the rest of either army.
+  const hooks = Tactics.install({});
+  Object.assign(attacker, { x: 0, z: 24, morale: 50, order: 'hold' });
+  Object.assign(defender, { x: 0, z: 18.8, order: 'attack' });
+  const fence = battle.fortifications.find(item => item.kind === 'palisade');
+  const initialHP = fence.hp;
+  hooks.move(battle, defender, 0, 24);
+  assert.equal(defender.z, 18.8, 'the enemy cannot walk through intact stakes');
+  assert.ok(fence.hp < initialHP, 'a blocked enemy attacks instead of stalling forever');
+  delete defender.fieldworkTarget;
+  const protectedDamage = hooks.damage(battle, defender, attacker, false);
+  fence.hp = 0;
+  const exposedDamage = hooks.damage(battle, defender, attacker, false);
+  assert.ok(protectedDamage < exposedDamage, 'a fence on the line of attack protects its own soldiers');
+  hooks.move(battle, defender, 0, 24);
+  assert.ok(defender.z > 18.8, 'destroyed stakes no longer block the enemy');
+  Object.assign(attacker, { x: 0, z: 31 });
+  Object.assign(defender, { x: 0, z: 29, order: 'hold' });
+  const camp = battle.fortifications.find(item => item.kind === 'camp');
+  const campDamage = hooks.damage(battle, defender, attacker, false);
+  camp.hp = 0;
+  const noCampDamage = hooks.damage(battle, defender, attacker, false);
+  assert.ok(campDamage < noCampDamage);
+  camp.hp = camp.maxHp;
+  for (const enemy of battle.units.filter(unit => unit.side === 'defender')) { enemy.x = 35; enemy.z = -30; enemy.order = 'hold'; }
+  Game.simulateTick(battle);
+  assert.ok(attacker.morale > 50, 'a nearby intact camp gradually restores morale during the actual simulation');
+  assert.equal(battle.captureZone.z, -32, 'an attacker camp does not move or replace the castle objective');
+});
+
+test('a player-built siege barricade is destroyed and the enemy still reaches the bailey after the garrison falls', () => {
+  const state = defenseState(false);
+  const prepared = Tactics.createDefense(state);
+  const response = Tactics.placeFortification(prepared, { kind: 'palisade', x: 0, z: -15, rotation: 0 });
+  assert.equal(response.ok, true, response.message);
+  const battle = finish(response.battle), fence = battle.fortifications[0];
+  assert.equal(fence.hp, 0, 'the invaders must break the additional fence behind the gate');
+  assert.ok(battle.events.some(item => item.text.includes('木柵が破壊')));
+  assert.equal(battle.winner, 'attacker', 'a built fence cannot trap the invasion after destroying the defending army');
+  assert.ok(battle.time < 180);
+  assert.ok(Tactics.verify(state, battle), 'damage to the player-built fence is reproduced and cannot bypass verification');
+  const settled = Game.settle(state, battle);
+  assert.equal(settled.ok, true, settled.message); valid(settled.state);
+  assert.equal(castle(settled.state, 'kiyosu').clan, castle(state, 'inabayama').clan);
 });

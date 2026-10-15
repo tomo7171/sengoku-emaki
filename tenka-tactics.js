@@ -15,6 +15,10 @@
     firearm: { cavalry: 1.4, ashigaru: 1.24, archer: 0.98 },
     navy: { navy: 1, ashigaru: 1.18, archer: 1.05, cavalry: 1.25 },
   });
+  const FORTIFICATIONS = Object.freeze({
+    camp: { name: "陣地", limit: 2, w: 5, d: 4, h: 2.8, hp: 500, description: "半径九以内の味方の被害を軽減し、士気をゆっくり回復" },
+    palisade: { name: "木柵", limit: 8, w: 7, d: 1, h: 2.2, hp: 800, description: "敵の進路を阻み、背後の味方を守る。敵の攻撃で破壊される" },
+  });
   const copy = (value) => JSON.parse(JSON.stringify(value));
   const sum = (values) => TYPES.reduce((total, type) => total + (values?.[type] || 0), 0);
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -52,6 +56,102 @@
   function contains(structure, x, z, radius = 0) {
     return Math.abs(x - structure.x) <= (structure.w ?? structure.width) / 2 + radius && Math.abs(z - structure.z) <= (structure.d ?? structure.depth) / 2 + radius;
   }
+  function fortificationContains(structure, x, z, padding = 0) {
+    const angle = (structure.rotation || 0) * Math.PI / 180, dx = x - structure.x, dz = z - structure.z;
+    return Math.abs(dx * Math.cos(angle) + dz * Math.sin(angle)) <= structure.w / 2 + padding
+      && Math.abs(-dx * Math.sin(angle) + dz * Math.cos(angle)) <= structure.d / 2 + padding;
+  }
+  function footprint(structure, padding = 0) {
+    const angle = (structure.rotation || 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
+    return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, z]) => {
+      const dx = x * (structure.w / 2 + padding), dz = z * (structure.d / 2 + padding);
+      return [structure.x + dx * c - dz * s, structure.z + dx * s + dz * c];
+    });
+  }
+  function overlap(left, right) {
+    const a = footprint(left, 0.35), b = footprint(right, 0.35);
+    for (const polygon of [a, b]) for (let index = 0; index < polygon.length; index++) {
+      const next = polygon[(index + 1) % polygon.length], axis = [next[1] - polygon[index][1], polygon[index][0] - next[0]];
+      const projections = [a, b].map((points) => points.map(([x, z]) => x * axis[0] + z * axis[1]));
+      if (Math.max(...projections[0]) < Math.min(...projections[1]) || Math.max(...projections[1]) < Math.min(...projections[0])) return false;
+    }
+    return true;
+  }
+  function fortificationBudget(battle) {
+    return Object.fromEntries(Object.entries(FORTIFICATIONS).map(([kind, specification]) => {
+      const used = (battle.fortifications || []).filter((item) => item.side === friendly(battle) && item.kind === kind).length;
+      return [kind, { limit: specification.limit, used, remaining: Math.max(0, specification.limit - used) }];
+    }));
+  }
+  function fortificationPosition(battle, structure, ignoreId = null) {
+    const zone = deploymentZone(battle), points = footprint(structure, 0.5);
+    if (points.some(([x, z]) => x < zone.xMin || x > zone.xMax || z < zone.zMin || z > zone.zMax)) return "陣地・木柵の全体を自軍の配置範囲内に収めてください。";
+    // Sample the entire footprint, not just its center: a long rotated fence
+    // must not span a moat while both endpoints happen to be on dry ground.
+    const angle = structure.rotation * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
+    for (let dx = -structure.w / 2; dx <= structure.w / 2 + 0.01; dx += 0.5) for (let dz = -structure.d / 2; dz <= structure.d / 2 + 0.01; dz += 0.5) {
+      const x = structure.x + dx * c - dz * s, z = structure.z + dx * s + dz * c;
+      if (battle.layout.water.some((water) => insidePolygon(x, z, water.polygon))) return "堀・川・海を避け、陸地に設置してください。";
+    }
+    if (battle.structures.some((item) => item.hp > 0 && overlap(structure, { ...item, w: item.w ?? item.width, d: item.d ?? item.depth, rotation: 0 }))) return "城門・城壁・建物・橋と重ならない場所へ設置してください。";
+    if ((battle.fortifications || []).some((item) => item.id !== ignoreId && overlap(structure, item))) return "陣地・木柵を重ねて設置することはできません。";
+    if (battle.units.some((unit) => active(unit) && fortificationContains(structure, unit.x, unit.z, 1.1))) return "部隊と重なっています。部隊か施設を移して間隔を空けてください。";
+    return null;
+  }
+  function placeFortification(battle, command = {}) {
+    if (battle.phase !== "deployment") return reject(battle, "陣地と木柵を設置できるのは開戦前だけです。");
+    const specification = Object.hasOwn(FORTIFICATIONS, command.kind) ? FORTIFICATIONS[command.kind] : null;
+    if (!specification || ![command.x, command.z, command.rotation ?? 0].every(Number.isFinite)) return reject(battle, "陣地または木柵と、有効な座標・角度を指定してください。");
+    if (!fortificationBudget(battle)[command.kind].remaining) return reject(battle, `${specification.name}は最大${specification.limit}か所までです。既存の施設を移動・撤去してください。`);
+    const rotation = ((command.rotation ?? 0) % 360 + 360) % 360;
+    const structure = { id: `fieldwork-${battle.fortificationSerial || 1}`, kind: command.kind, side: friendly(battle), x: command.x, z: command.z, rotation, w: specification.w, d: specification.d, h: specification.h, hp: specification.hp, maxHp: specification.hp };
+    const message = fortificationPosition(battle, structure);
+    if (message) return reject(battle, message);
+    const result = copy(battle);
+    result.fortificationSerial = (result.fortificationSerial || 1) + 1;
+    result.fortifications.push(structure);
+    result.ledger.push({ kind: "fieldwork-place", command: { kind: command.kind, x: structure.x, z: structure.z, rotation } });
+    return { battle: result, ok: true, message: `${specification.name}を設置しました。開戦前は移動・回転・撤去できます。`, fortificationId: structure.id };
+  }
+  function moveFortification(battle, command = {}) {
+    if (battle.phase !== "deployment") return reject(battle, "陣地と木柵を移動できるのは開戦前だけです。");
+    const selected = (battle.fortifications || []).find((item) => item.id === command.id && item.side === friendly(battle));
+    if (!selected) return reject(battle, "自分で設置した陣地または木柵を選んでください。");
+    const x = command.x ?? selected.x, z = command.z ?? selected.z, angle = command.rotation ?? selected.rotation;
+    if (![x, z, angle].every(Number.isFinite)) return reject(battle, "有効な座標と角度を指定してください。");
+    const rotation = (angle % 360 + 360) % 360, structure = { ...selected, x, z, rotation };
+    const message = fortificationPosition(battle, structure, selected.id);
+    if (message) return reject(battle, message);
+    const result = copy(battle);
+    Object.assign(result.fortifications.find((item) => item.id === selected.id), { x, z, rotation });
+    result.ledger.push({ kind: "fieldwork-move", command: { id: selected.id, x, z, rotation } });
+    return { battle: result, ok: true, message: `${FORTIFICATIONS[selected.kind].name}の配置・向きを変更しました。`, fortificationId: selected.id };
+  }
+  function removeFortification(battle, id) {
+    if (battle.phase !== "deployment") return reject(battle, "陣地と木柵を撤去できるのは開戦前だけです。");
+    const selected = (battle.fortifications || []).find((item) => item.id === id && item.side === friendly(battle));
+    if (!selected) return reject(battle, "自分で設置した陣地または木柵を選んでください。");
+    const result = copy(battle);
+    result.fortifications = result.fortifications.filter((item) => item.id !== id);
+    result.ledger.push({ kind: "fieldwork-remove", command: { id } });
+    return { battle: result, ok: true, message: `${FORTIFICATIONS[selected.kind].name}を撤去し、設置枠を戻しました。` };
+  }
+  function segmentHits(structure, fromX, fromZ, toX, toZ, padding = 0) {
+    const angle = (structure.rotation || 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
+    const local = (x, z) => [(x - structure.x) * c + (z - structure.z) * s, -(x - structure.x) * s + (z - structure.z) * c];
+    const a = local(fromX, fromZ), b = local(toX, toZ), half = [structure.w / 2 + padding, structure.d / 2 + padding];
+    let min = 0, max = 1;
+    for (let axis = 0; axis < 2; axis++) {
+      const delta = b[axis] - a[axis];
+      if (Math.abs(delta) < 1e-9) { if (Math.abs(a[axis]) > half[axis]) return false; }
+      else {
+        const first = (-half[axis] - a[axis]) / delta, last = (half[axis] - a[axis]) / delta;
+        min = Math.max(min, Math.min(first, last)); max = Math.min(max, Math.max(first, last));
+        if (min > max) return false;
+      }
+    }
+    return true;
+  }
   function blocked(battle, x, z, type) {
     if (type === "navy") return !isSea(battle, x, z);
     for (const water of battle.layout.water) {
@@ -68,6 +168,8 @@
     battle.playerSide = options.defending ? "defender" : battle.playerSide || "attacker";
     battle.defending = battle.playerSide === "defender";
     battle.tacticsVersion = 1;
+    battle.fortifications = battle.fortifications || [];
+    battle.fortificationSerial = battle.fortificationSerial || 1;
     battle.supply = battle.supply || {
       attacker: { initial: Math.max(0, options.attackerFood ?? 100000), consumed: 0, exhausted: false },
       defender: { initial: Math.max(0, options.defenderFood ?? 100000), consumed: 0, exhausted: false },
@@ -122,6 +224,7 @@
     const home = side === "defender" ? battle.targetCastle : battle.sourceCastle;
     if (type === "navy" && (!home.coastal || !battle.coastal)) return reject(battle, "水軍は沿岸拠点の海上へ配置してください。");
     if (blocked(battle, x, z, type)) return reject(battle, "堀・海・城壁を避け、水軍は海上へ配置してください。");
+    if (troops > 0 && (battle.fortifications || []).some((item) => item.kind === "palisade" && fortificationContains(item, x, z, 0.8))) return reject(battle, "木柵の上には配置できません。柵の後ろへ部隊を配置してください。");
     const others = battle.units.filter((item) => item.side === side && item.id !== unit.id);
     if (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops) return reject(battle, "出陣できる兵科別の兵数を超えています。");
     const commanderId = Object.hasOwn(command, "commanderId") ? command.commanderId : unit.commanderId;
@@ -142,7 +245,7 @@
     if (!unit || !["move", "attack", "hold", "retreat"].includes(command.order)) return reject(battle, "活動中の自軍部隊と有効な命令を選んでください。");
     const x = command.x ?? unit.x, z = command.z ?? unit.z, box = bounds(battle);
     if (!Number.isFinite(x) || !Number.isFinite(z) || x < box.minX + 1 || x > box.maxX - 1 || z < box.minZ + 1 || z > box.maxZ - 1) return reject(battle, "戦場の範囲内を指定してください。");
-    if (command.targetId && !battle.units.some((item) => item.id === command.targetId && item.side !== side) && !(side === "attacker" && battle.structures.some((item) => item.id === command.targetId))) return reject(battle, "敵部隊または攻撃可能な城の施設を選んでください。");
+    if (command.targetId && !battle.units.some((item) => item.id === command.targetId && item.side !== side) && !(side === "attacker" && battle.structures.some((item) => item.id === command.targetId)) && !(battle.fortifications || []).some((item) => item.id === command.targetId && item.side !== side && item.hp > 0)) return reject(battle, "敵部隊または攻撃可能な施設を選んでください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unit.id);
     Object.assign(selected, { order: command.order, targetId: command.targetId || null, targetX: x, targetZ: command.order === "retreat" ? side === "attacker" ? box.maxZ - 1 : box.minZ + 1 : z, status: command.order === "retreat" ? "retreating" : "fighting" });
     if (command.order !== "hold") { selected.ambush = false; selected.revealed = true; }
@@ -176,6 +279,7 @@
     return { battle: result, ok: true, message: selected.ambush ? "伏兵を配置。敵が接近すると奇襲し、短時間だけ攻撃と士気崩しが強まります。" : "伏兵を解除しました。" };
   }
   function damage(battle, attacker, target, structure) {
+    if (attacker.fieldworkTarget) return 0;
     if (attacker.ambush && !attacker.revealed) return 0;
     if (target.ambush && !target.revealed && Math.hypot(attacker.x - target.x, attacker.z - target.z) > 11) return 0;
     const attackFormation = FORMATIONS[attacker.formation] || FORMATIONS.line;
@@ -194,15 +298,20 @@
       if (["mountain", "hill", "forest"].includes(battle.terrain) && target.order === "hold") factor *= 0.86;
       if (attacker.ambushUntil > battle.time) factor *= 1.65;
       if (ranged && (battle.terrainFeatures || []).some((feature) => feature.type === "forest" && Math.hypot(target.x - feature.x, target.z - feature.z) <= feature.radius)) factor *= 0.82;
+      if ((battle.fortifications || []).some((item) => item.kind === "camp" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9)) factor /= 1.12;
+      if ((battle.fortifications || []).some((item) => item.kind === "palisade" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9 && segmentHits(item, attacker.x, attacker.z, target.x, target.z))) factor *= ranged ? 0.68 : 0.82;
     }
     return original.damage(battle, attacker, target, structure) * factor;
   }
   function move(battle, unit, x, z) {
+    if (unit.fieldworkTarget) return;
     if (unit.ambush && !unit.revealed) return;
     if (battle.defending && unit.side === "defender" && unit.order === "hold") return;
     // The engine chooses a normalized movement vector; scaling its target distance
     // preserves collision handling while changing the step size below.
     const oldX = unit.x, oldZ = unit.z;
+    const commandedFieldwork = (battle.fortifications || []).find((item) => item.id === unit.targetId && item.side !== unit.side && item.hp > 0);
+    if (commandedFieldwork && unit.order === "attack") { x = commandedFieldwork.x; z = commandedFieldwork.z; }
     if (battle.mode === "siege" && unit.type !== "navy") {
       const direction = Math.sign(z - oldZ);
       // The base path follower advances within two units of a waypoint. At a
@@ -225,9 +334,38 @@
       if (!blocked(battle, nextX, nextZ, unit.type)) { unit.x = nextX; unit.z = nextZ; }
     }
     for (const gate of gates) gate.passable = false;
+    const obstruction = unit.type !== "navy" && (battle.fortifications || []).find((item) => item.hp > 0 && item.kind === "palisade" && item.side !== unit.side && segmentHits(item, oldX, oldZ, unit.x, unit.z, 0.45));
+    if (obstruction) {
+      unit.x = oldX; unit.z = oldZ;
+      // Even after the garrison is defeated, a surviving fence on the final
+      // route to the bailey must be attacked instead of causing a path stall.
+      if (unit.order !== "retreat") {
+        obstruction.hp = Math.max(0, obstruction.hp - original.damage(battle, unit, obstruction, true));
+        unit.fieldworkTarget = obstruction.id;
+      }
+    }
   }
   function tick(battle) {
     if (battle.phase !== "fighting") return;
+    const fieldworkDamage = new Map();
+    for (const unit of battle.units) {
+      if (!active(unit) || unit.order === "retreat" || (unit.ambush && !unit.revealed)) continue;
+      if (unit.morale < Math.max(unit.initialMorale, 85) && (battle.fortifications || []).some((item) => item.kind === "camp" && item.side === unit.side && item.hp > 0 && Math.hypot(unit.x - item.x, unit.z - item.z) <= 9)) unit.morale = Math.min(Math.max(unit.initialMorale, 85), unit.morale + 0.025);
+      const enemies = battle.units.filter((enemy) => enemy.side !== unit.side && active(enemy));
+      const target = enemies.find((enemy) => enemy.id === unit.targetId) || enemies.sort((a, b) => Math.hypot(unit.x - a.x, unit.z - a.z) - Math.hypot(unit.x - b.x, unit.z - b.z))[0] || (battle.mode === "siege" && unit.side === "attacker" ? battle.captureZone : null);
+      const obstacles = (battle.fortifications || []).filter((item) => {
+        if (item.hp <= 0 || item.side === unit.side || unit.type === "navy") return false;
+        const reach = unit.range + Math.max(item.w, item.d) / 2;
+        return Math.hypot(unit.x - item.x, unit.z - item.z) <= reach && (unit.targetId === item.id || (item.kind === "palisade" && target && segmentHits(item, unit.x, unit.z, target.x, target.z, 0.45)) || (item.kind === "camp" && Math.hypot(unit.x - item.x, unit.z - item.z) < 5));
+      }).sort((a, b) => Math.hypot(unit.x - a.x, unit.z - a.z) - Math.hypot(unit.x - b.x, unit.z - b.z));
+      if (obstacles.length) {
+        const obstacle = obstacles[0];
+        fieldworkDamage.set(obstacle.id, (fieldworkDamage.get(obstacle.id) || 0) + original.damage(battle, unit, obstacle, true));
+        // A unit spends this tick attacking the fence, never simultaneously
+        // dealing its full attack to the soldiers protected behind it.
+        unit.fieldworkTarget = obstacle.id;
+      }
+    }
     for (const unit of battle.units) {
       if (!active(unit) || !unit.ambush || unit.revealed) continue;
       const nearby = battle.units.filter((enemy) => enemy.side !== unit.side && active(enemy) && Math.hypot(enemy.x - unit.x, enemy.z - unit.z) <= 11);
@@ -263,6 +401,14 @@
       unit.targetZ = enemy.z;
     }
     original.tick(battle);
+    for (const unit of battle.units) delete unit.fieldworkTarget;
+    for (const structure of battle.fortifications || []) {
+      structure.hp = Math.max(0, structure.hp - (fieldworkDamage.get(structure.id) || 0));
+      if (!structure.hp && !structure.destroyedLogged) {
+        structure.destroyedLogged = true;
+        event(battle, `${structure.side === friendly(battle) ? "自軍" : "敵軍"}の${FORTIFICATIONS[structure.kind].name}が破壊されました。`);
+      }
+    }
     for (const unit of battle.units) if (sorties.includes(unit.id) && active(unit) && unit.order !== "retreat") unit.order = "attack";
     if (battle.defending && battle.phase === "finished") {
       battle.playerWon = battle.winner === "defender";
@@ -290,8 +436,8 @@
       if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
       let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode });
       for (const record of battle.ledger) {
-        if (record.kind === "deploy" || record.kind === "order" || record.kind === "formation" || record.kind === "ambush") {
-          const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : ambush(replay, record.command.unitId);
+        if (["deploy", "order", "formation", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
+          const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
           if (!answer.ok) return null;
           replay = answer.battle;
         } else if (record.kind === "start" && replay.phase === "deployment") replay = original.start(replay);
@@ -397,5 +543,5 @@
     installed = { ...core, create, deploy, order, damage, move, tick, result, verify };
     return installed;
   }
-  root.TenkaTactics = Object.freeze({ version: 1, formations: FORMATIONS, matchups: MATCHUPS, install, prepare, createDefense, settleDefense, deploy, order, formation, ambush, canAmbush, deploymentZone, offsets, verify, result, stamp });
+  root.TenkaTactics = Object.freeze({ version: 1, formations: FORMATIONS, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, result, stamp });
 })(typeof window !== "undefined" ? window : globalThis);
