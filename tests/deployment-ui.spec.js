@@ -13,6 +13,7 @@ function renderer(props){
  props.onBattle=battle=>{props.battle=battle;};
  props.onDeploymentToolChange=tool=>{props.deploymentTool=tool;props.selectedStructureId=null;};
  props.onSelectedStructureChange=id=>{props.selectedStructureId=id;};
+ props.onSelectedUnitChange=id=>{props.selectedUnitId=id;};
  props.onPlacementRotationChange=angle=>{props.placementRotation=angle;};
  return {render(){cursor=0;return Component(props);}};
 }
@@ -104,4 +105,62 @@ test('switching placement tools clears structure editing and combat leaves only 
  tree=screen.render();control(tree,'select','部隊の陣形').props.onChange({target:{value:'wedge'}});assert.equal(props.battle.units.find(u=>u.id===unit.id).formation,'wedge');
  props.battle=Game.startBattle(props.battle);tree=screen.render();
  assert.equal(flatten(tree).some(n=>n.type==='button'&&content(n)==='本陣'),false);assert.ok(control(tree,'select','部隊の陣形'));assert.equal(control(tree,'button','伏兵を配置').props.disabled,true);
+});
+
+function unitCoordinates(screen,x,z){
+ let tree=screen.render();control(tree,'input','部隊の東西座標').props.onChange({target:{value:String(x)}});
+ tree=screen.render();control(tree,'input','部隊の南北座標').props.onChange({target:{value:String(z)}});
+ tree=screen.render();flatten(tree).find(n=>n.type==='form'&&n.props.className==='tenka-unit-coordinates').props.onSubmit({preventDefault(){}});
+}
+function unitSpot(battle,id){
+ const zone=Tactics.deploymentZone(battle),current=battle.units.find(u=>u.id===id);
+ for(let z=Math.ceil(zone.zMin+3);z<zone.zMax-3;z+=3)for(let x=Math.ceil(zone.xMin+3);x<zone.xMax-3;x+=3){
+  if(Math.hypot(x-current.x,z-current.z)<15)continue;
+  if(Tactics.deploy(battle,{unitId:id,x,z}).ok)return {x,z};
+ }
+ throw new Error('No available unit position');
+}
+
+test('the player selects and confirms troop positions from the toolbar in all three modes',()=>{
+ for(const battle of [field(),field('siege'),defense()]){
+  const side=battle.playerSide||'attacker',own=battle.units.filter(u=>u.side===side&&u.troops>0),chosen=own[1]||own[0];
+  const props={battle,selectedUnitId:own[0].id,deploymentTool:'unit'},screen=renderer(props);
+  let tree=screen.render();assert.match(content(tree),/プレイヤーの布陣/);assert.match(content(tree),/現在の配置は初期案/);
+  const picker=control(tree,'select','配置する部隊'),options=flatten(picker).filter(n=>n.type==='option'&&n.props.value);
+  assert.equal(options.length,own.length);assert.ok(options.every(n=>content(n).includes('仮配置・未確認')));
+  assert.ok(options.every(n=>own.some(u=>u.id===n.props.value)),'enemy units never appear in the own-force picker');
+  picker.props.onChange({target:{value:chosen.id}});assert.equal(props.selectedUnitId,chosen.id);
+  tree=screen.render();assert.equal(control(tree,'input','部隊の東西座標').props.value,String(Math.round(chosen.x*10)/10));
+  const destination=unitSpot(props.battle,chosen.id);unitCoordinates(screen,destination.x,destination.z);
+  const deployed=props.battle.units.find(u=>u.id===chosen.id);assert.equal(deployed.x,destination.x);assert.equal(deployed.z,destination.z);assert.equal(deployed.commanderId,chosen.commanderId);assert.equal(deployed.troops,chosen.troops);
+  tree=screen.render();assert.match(content(tree),new RegExp('配置確認 1 / '+own.length+' 部隊'));
+  assert.match(content(flatten(tree).find(n=>n.type==='option'&&n.props.value===chosen.id)),/配置確認済/);
+  const restored=renderer({...props,battle:JSON.parse(JSON.stringify(props.battle))});assert.match(content(restored.render()),/配置確認 1 \/ /,'confirmation follows the existing deployment ledger');
+ }
+});
+
+test('troop coordinate UI rejects enemy ground, out-of-bounds and waterways without marking a unit confirmed',()=>{
+ for(const battle of [field(),field('siege'),defense()]){
+  const side=battle.playerSide||'attacker',unit=battle.units.find(u=>u.side===side&&u.troops>0),zone=Tactics.deploymentZone(battle);
+  // A representative river within the home deployment area also checks the form
+  // against production water rules when the selected castle has no natural river.
+  const water={x:zone.xMin+5,z:zone.zMax-5};
+  battle.layout.water.push({type:'river',polygon:[[water.x-1,water.z-1],[water.x+1,water.z-1],[water.x+1,water.z+1],[water.x-1,water.z+1]]});
+  const props={battle,selectedUnitId:unit.id,deploymentTool:'unit'},screen=renderer(props),snapshot=JSON.stringify(battle);
+  for(const invalid of [{x:zone.xMax+4,z:unit.z},{x:unit.x,z:side==='attacker'?zone.zMin-8:zone.zMax+8},water]){
+   unitCoordinates(screen,invalid.x,invalid.z);assert.equal(JSON.stringify(props.battle),snapshot,'a rejected coordinate cannot change the battle');
+   assert.match(content(screen.render()),/配置|避け/);assert.match(content(screen.render()),/配置確認 0 \/ /);
+  }
+  unitCoordinates(screen,'',unit.z);assert.match(content(screen.render()),/部隊を置く東西・南北の座標を両方入力/);assert.equal(JSON.stringify(props.battle),snapshot);
+ }
+});
+
+test('terrain guide exposes real feature names and coordinates, and a map move refreshes the selected troop form',()=>{
+ const battle=field(),unit=battle.units.find(u=>u.side==='attacker'),props={battle,selectedUnitId:unit.id,deploymentTool:'unit'},screen=renderer(props);
+ let tree=screen.render();assert.match(content(tree),/戦場の地形と陣取り/);
+ for(const feature of battle.terrainFeatures){assert.ok(content(tree).includes(feature.name));assert.ok(content(tree).includes('東西 '+Math.round(feature.x)+'・南北 '+Math.round(feature.z)));}
+ control(tree,'input','部隊の東西座標').props.onChange({target:{value:'22'}});
+ const destination=unitSpot(battle,unit.id);props.battle=Tactics.deploy(battle,{unitId:unit.id,...destination}).battle;
+ tree=screen.render();assert.equal(control(tree,'input','部隊の東西座標').props.value,String(destination.x));assert.equal(control(tree,'input','部隊の南北座標').props.value,String(destination.z));
+ props.battle=Game.startBattle(props.battle);tree=screen.render();assert.equal(flatten(tree).some(n=>n.type==='input'&&n.props['aria-label']==='部隊の東西座標'),false);assert.equal(flatten(tree).some(n=>n.type==='select'&&n.props['aria-label']==='配置する部隊'),false);
 });

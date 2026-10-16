@@ -12,7 +12,7 @@ const initial = Game.newGame();
 const materials = Object.fromEntries(['wood', 'darkWood', 'stone', 'earth', 'plaster', 'roof', 'iron']
   .map(name => [name, new Three.MeshStandardMaterial({ color: '#9b8a73' })]));
 
-function battleFor(id) {
+function battleFor(id, battlefieldVersion = 1) {
   const state = clone(initial), target = state.castles.find(castle => castle.id === id);
   const source = state.castles.find(castle => castle.id === target.neighbors[0]);
   state.playerClan = source.clan; state.alliances = [];
@@ -21,7 +21,7 @@ function battleFor(id) {
   // the target's production terrain, profile, castle layout or collision data.
   source.troops = 6000; source.coastal = true;
   state.armies[source.id].units = { ashigaru: 4000, navy: 2000, archer: 0, cavalry: 0, firearm: 0 };
-  return Game.createBattle({ state, sourceId: source.id, targetId: id, mode: 'siege' });
+  return Game.createBattle({ state, sourceId: source.id, targetId: id, mode: 'siege', battlefieldVersion });
 }
 
 function geometryIsFinite(geometry, label, requireUV = true) {
@@ -42,12 +42,39 @@ function geometryIsFinite(geometry, label, requireUV = true) {
   return (geometry.index?.count || position.count) / 3;
 }
 
+const flatCross = (a,b,c) => (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+function flatPointDistance(point,a,b) {
+  const dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((point[0]-a[0])*dx+(point[1]-a[1])*dz)/(dx*dx+dz*dz||1)));
+  return Math.hypot(point[0]-a[0]-t*dx,point[1]-a[1]-t*dz);
+}
+const flatSegmentDistance = (a,b,c,d) => flatCross(a,b,c)*flatCross(a,b,d)<0 && flatCross(c,d,a)*flatCross(c,d,b)<0 ? 0
+  : Math.min(flatPointDistance(a,c,d),flatPointDistance(b,c,d),flatPointDistance(c,a,b),flatPointDistance(d,a,b));
+function flatInside(point,polygon) {
+  let result=false;
+  for(let index=0,previous=polygon.length-1;index<polygon.length;previous=index++) {
+    const a=polygon[index],b=polygon[previous];
+    if((a[1]>point[1])!==(b[1]>point[1])&&point[0]<(b[0]-a[0])*(point[1]-a[1])/(b[1]-a[1])+a[0])result=!result;
+  }
+  return result;
+}
+function assertDryFootprint(corners,waters,label) {
+  const edges=corners.map((point,index)=>[point,corners[(index+1)%corners.length]]);
+  const samples=[...corners,...edges.map(([a,b])=>[(a[0]+b[0])/2,(a[1]+b[1])/2])];
+  for(const water of waters) {
+    assert.ok(!samples.some(point=>flatInside(point,water.polygon))&&!water.polygon.some(point=>flatInside(point,corners)),`${label}: corners and edge midpoints stay out of ${water.id||water.type}`);
+    for(const [a,b] of edges) for(let edge=0;edge<water.polygon.length;edge++) {
+      const c=water.polygon[edge],d=water.polygon[(edge+1)%water.polygon.length];
+      assert.ok(flatSegmentDistance(a,b,c,d)>1e-5,`${label}: a water bank cannot cut through the footprint`);
+    }
+  }
+}
+
 test('all 95 real castle layouts build finite textured architecture within a bounded geometry budget, preserving battle rules', () => {
   assert.equal(Game.castles.length, 95);
   const terrains = new Set(), kinds = new Set();
   for (const castle of Game.castles) {
     const battle = battleFor(castle.id), before = JSON.stringify(battle), geometries = new Set();
-    let meshes = 0, triangles = 0, principalBuildings = 0;
+    let meshes = 0, countrysideMeshes = 0, triangles = 0, principalBuildings = 0;
     terrains.add(castle.terrain);
     for (const structure of battle.structures) {
       kinds.add(structure.kind);
@@ -74,13 +101,15 @@ test('all 95 real castle layouts build finite textured architecture within a bou
         assert.ok(object.matrixWorld.elements.every(Number.isFinite), `${structure.id}: finite placement`);
         if (object.isMesh) {
           meshes++; triangles += geometryIsFinite(object.geometry, `${castle.id}/${structure.id}`);
+          if (structure.landscape) countrysideMeshes++;
           assert.ok(geometries.has(object.geometry), 'the parent renderer can dispose every geometry');
         }
       });
     }
     // Raw meshes are batched by material by the renderer; bound geometric work
     // here so decorative masonry cannot silently balloon into millions of faces.
-    assert.ok(meshes > 20 && meshes < 4500, `${castle.id}: bounded source meshes (${meshes})`);
+    assert.ok(meshes-countrysideMeshes > 20 && meshes-countrysideMeshes < 4500, `${castle.id}: bounded castle source meshes (${meshes-countrysideMeshes})`);
+    assert.ok(countrysideMeshes < 400, `${castle.id}: the four countryside crossings have a separate bounded geometry cost (${countrysideMeshes})`);
     assert.ok(triangles < 60000, `${castle.id}: bounded castle triangles (${triangles})`);
     assert.ok(principalBuildings > 0 && principalBuildings <= 2, `${castle.id}: a defined principal residence anchors the castle`);
     assert.equal(JSON.stringify(battle), before, `${castle.id}: visual construction leaves routes, collision, HP and units intact`);
@@ -149,9 +178,9 @@ test('roofs have curved lit surfaces and rotated earthwork segments follow the a
   for (const group of [model.group, sloped.group]) group.traverse(object => object.geometry?.dispose());
 });
 
-test('real landscape instances keep finite transforms and eight draw calls, then release their owned graphics once', () => {
-  for (const id of ['nanao', 'inabayama', 'odawara', 'kiyosu', 'wakimoto']) {
-    const battle = battleFor(id), before = JSON.stringify(battle), scene = new Three.Group(), sentinel = new Three.Group();
+test('legacy and wide landscapes keep finite textured batches within their separate budgets and release owned graphics once', () => {
+  for (const battlefieldVersion of [0, 1]) for (const id of ['nanao', 'inabayama', 'odawara', 'kiyosu', 'wakimoto']) {
+    const battle = battleFor(id, battlefieldVersion), before = JSON.stringify(battle), scene = new Three.Group(), sentinel = new Three.Group();
     scene.add(sentinel);
     const landscape = Environment.create(Three, { battle, scene, heightAt: (x, z) => .18 + Math.sin(x * .1) + Math.cos(z * .1) });
     const geometries = new Set(), surfaces = new Set(), instances = [], disposals = new Map();
@@ -159,7 +188,9 @@ test('real landscape instances keep finite transforms and eight draw calls, then
     landscape.group.traverse(object => {
       if (!object.isMesh) return;
       draws++; geometries.add(object.geometry); surfaces.add(object.material);
-      triangles += geometryIsFinite(object.geometry, `${id}/${object.name}`, false) * (object.isInstancedMesh ? object.count : 1);
+      const textured = object.name.startsWith('terrain-following-') || object.name.includes('house-walls')
+        || object.name.includes('earth-plaster-walls') || object.name.includes('-hip-roofs');
+      triangles += geometryIsFinite(object.geometry, `${id}/${object.name}`, textured) * (object.isInstancedMesh ? object.count : 1);
       if (object.isInstancedMesh) {
         instances.push(object);
         assert.ok(object.instanceMatrix.array.every(Number.isFinite), 'every tree, rock and grass transform is finite');
@@ -167,8 +198,14 @@ test('real landscape instances keep finite transforms and eight draw calls, then
       }
     });
     assert.equal(draws, landscape.stats.drawCalls);
-    assert.ok(draws <= 8 && instances.length >= 4, `${id}: forest detail is instanced instead of one draw per tree`);
-    assert.ok(triangles < 90000, `${id}: forest triangle budget (${triangles})`);
+    const wide = !!battle.layout.landscape?.version;
+    assert.equal(wide, battlefieldVersion === 1);
+    assert.ok(draws <= (wide ? 24 : 8) && instances.length >= 4, `${id}: countryside detail is batched instead of one draw per tree or house (${draws})`);
+    assert.ok(triangles < (wide ? 150000 : 90000), `${id}: ${wide?'wide':'legacy'} landscape triangle budget (${triangles})`);
+    if (wide) {
+      assert.equal(landscape.stats.fields, battle.layout.landscape.fields.length);
+      assert.equal(landscape.stats.houses, battle.layout.landscape.settlements.reduce((sum, settlement) => sum + settlement.houses.length, 0));
+    }
     for (const item of [...geometries, ...surfaces, ...instances]) {
       disposals.set(item, 0); item.addEventListener('dispose', () => disposals.set(item, disposals.get(item) + 1));
     }
@@ -177,4 +214,80 @@ test('real landscape instances keep finite transforms and eight draw calls, then
     assert.ok([...disposals.values()].every(value => value === 1), 'closing a battle releases each owned GPU resource exactly once');
     assert.equal(JSON.stringify(battle), before, 'graphics leave the playable battle intact');
   }
+});
+
+test('rendered village walls match their authoritative houses and leave roads, rivers and initial troops clear', () => {
+  const distance=flatPointDistance,segmentsDistance=flatSegmentDistance,inside=flatInside;
+  for (const id of ['nanao','odawara','wakimoto']) {
+    const battle=battleFor(id),before=JSON.stringify(battle),scene=new Three.Group();
+    const ground=(x,z)=>.18+context.TenkaBattlefield.elevationDelta(battle.layout,x,z);
+    const landscape=Environment.create(Three,{battle,scene,heightAt:ground});
+    const houses=battle.layout.landscape.settlements.flatMap(settlement=>settlement.houses),seen=new Set();
+    scene.updateMatrixWorld(true);
+    const foundationMesh=landscape.meshes.find(item=>item.name==='settlement-stone-foundations');
+    assert.equal(foundationMesh?.count,houses.length,'every hillside house has a matching foundation');
+    foundationMesh.geometry.computeBoundingBox();
+    const foundations=Array.from({length:foundationMesh.count},(_,index)=>{
+      const matrix=new Three.Object3D().matrix;foundationMesh.getMatrixAt(index,matrix);
+      const center=new Three.Vector3().applyMatrix4(matrix).applyMatrix4(foundationMesh.matrixWorld);
+      const bottom=new Three.Vector3(0,foundationMesh.geometry.boundingBox.min.y,0).applyMatrix4(matrix).applyMatrix4(foundationMesh.matrixWorld).y;
+      const top=new Three.Vector3(0,foundationMesh.geometry.boundingBox.max.y,0).applyMatrix4(matrix).applyMatrix4(foundationMesh.matrixWorld).y;
+      return {center,bottom,top};
+    });
+    for(const mesh of landscape.meshes.filter(item=>['settlement-wooden-house-walls','town-white-earth-plaster-walls'].includes(item.name))) {
+      mesh.geometry.computeBoundingBox();
+      const bounds=mesh.geometry.boundingBox,matrix=new Three.Object3D().matrix;
+      for(let index=0;index<mesh.count;index++) {
+        mesh.getMatrixAt(index,matrix);
+        const center=new Three.Vector3().applyMatrix4(matrix).applyMatrix4(mesh.matrixWorld);
+        const house=houses.find(item=>Math.hypot(item.x-center.x,item.z-center.z)<1e-4);
+        assert.ok(house,`${id}: every rendered wall has an authoritative house footprint`);
+        assert.equal(seen.has(house.id),false,'a house is rendered exactly once');seen.add(house.id);
+        const corners=[[bounds.min.x,bounds.min.z],[bounds.max.x,bounds.min.z],[bounds.max.x,bounds.max.z],[bounds.min.x,bounds.max.z]]
+          .map(([x,z])=>{const point=new Three.Vector3(x,0,z).applyMatrix4(matrix).applyMatrix4(mesh.matrixWorld);return [point.x,point.z]});
+        const expected=[[-house.w/2,-house.d/2],[house.w/2,-house.d/2],[house.w/2,house.d/2],[-house.w/2,house.d/2]]
+          .map(([x,z])=>[house.x+Math.cos(house.rotation||0)*x-Math.sin(house.rotation||0)*z,house.z+Math.sin(house.rotation||0)*x+Math.cos(house.rotation||0)*z]);
+        assert.ok(corners.every(corner=>expected.some(point=>Math.hypot(point[0]-corner[0],point[1]-corner[1])<1e-4)),'rendered wall dimensions and rotation match the movement collider');
+        const outer=[[-house.w/2-.13,-house.d/2-.13],[house.w/2+.13,-house.d/2-.13],[house.w/2+.13,house.d/2+.13],[-house.w/2-.13,house.d/2+.13]]
+          .map(([x,z])=>[house.x+Math.cos(house.rotation||0)*x-Math.sin(house.rotation||0)*z,house.z+Math.sin(house.rotation||0)*x+Math.cos(house.rotation||0)*z]);
+        const terrainSamples=[[house.x,house.z],...expected,...outer].map(([x,z])=>ground(x,z));
+        const wallBottom=center.y-house.height/2,terrainMax=Math.max(...terrainSamples);
+        assert.ok(wallBottom-terrainMax>.15&&wallBottom-terrainMax<.17,'level walls sit above the highest ground instead of sinking into a hillside');
+        const footing=foundations.find(item=>Math.hypot(item.center.x-house.x,item.center.z-house.z)<1e-4);
+        assert.ok(footing&&footing.top>=wallBottom-.001&&footing.top<wallBottom+.04,'the stone foundation reaches the level house floor');
+        assert.ok(terrainSamples.every(height=>footing.bottom<height&&footing.top>height),'the foundation spans every ground sample rather than floating over lower corners');
+        const edges=corners.map((point,edge)=>[point,corners[(edge+1)%corners.length]]);
+        for(const path of battle.layout.paths) for(let part=1;part<path.points.length;part++) {
+          const a=path.points[part-1],b=path.points[part];
+          const separation=Math.min(...edges.map(([c,d])=>segmentsDistance(a,b,c,d)));
+          assert.ok(separation>=path.width/2-.01&&!inside(a,corners)&&!inside(b,corners),`${id}/${house.id}: solid house walls must leave the ${path.id} road corridor open (${separation})`);
+        }
+        assertDryFootprint(corners,battle.layout.water,`${id}/${house.id}`);
+        for(const unit of battle.units) {
+          const point=[unit.x,unit.z];
+          assert.ok(!inside(point,corners)&&Math.min(...edges.map(([a,b])=>distance(point,a,b)))>1,`${id}: initial formations cannot spawn inside village walls`);
+        }
+      }
+    }
+    assert.equal(seen.size,houses.length,'all real houses have one matching rendered wall body');
+    landscape.dispose();
+    assert.equal(JSON.stringify(battle),before,'clearance verification and rendering do not move houses or soldiers');
+  }
+});
+
+test('all 95 countryside plans keep every house and field footprint clear of both original and expanded water', () => {
+  let coastal=0,footprints=0;
+  for(const castle of Game.castles) {
+    const battle=battleFor(castle.id),before=JSON.stringify(battle),world=battle.layout.landscape;
+    assert.ok(world?.version,'test the live expanded countryside');
+    if(castle.coastal)coastal++;
+    for(const item of [...world.fields,...world.settlements.flatMap(settlement=>settlement.houses)]) {
+      const w=(item.w??item.width)/2,d=(item.d??item.depth)/2,angle=item.rotation||0;
+      const corners=[[-w,-d],[w,-d],[w,d],[-w,d]].map(([x,z])=>[item.x+Math.cos(angle)*x-Math.sin(angle)*z,item.z+Math.sin(angle)*x+Math.cos(angle)*z]);
+      assertDryFootprint(corners,battle.layout.water,`${castle.id}/${item.id}`);
+      footprints++;
+    }
+    assert.equal(JSON.stringify(battle),before);
+  }
+  assert.ok(coastal>10&&footprints>3000,'cover sea-facing castles and thousands of physical house/field footprints');
 });

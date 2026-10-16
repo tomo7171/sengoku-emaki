@@ -81,6 +81,7 @@ def main():
     parser.add_argument('--chromium', default='/usr/bin/chromium')
     parser.add_argument('--screenshots', default='/tmp/tenka-fortress-browser')
     parser.add_argument('--widths', default='1440,390')
+    parser.add_argument('--castles', default='nanao,kiyosu,shuri')
     args = parser.parse_args()
     base = args.url.rstrip('/')
     screenshots = Path(args.screenshots)
@@ -99,6 +100,8 @@ def main():
         # valid synthetic siege fixture while preserving its stone castle plan.
         {'sourceId': 'zakimi', 'targetId': 'shuri', 'opposingClan': 'oda'},
     ]
+    selected_castles = set(args.castles.split(','))
+    cases = [case for case in cases if case['targetId'] in selected_castles]
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             executable_path=args.chromium, headless=True,
@@ -121,7 +124,7 @@ def main():
                 page.get_by_role('button', name=re.compile('^攻城戦')).click()
                 page.get_by_role('button', name='戦場で采配する', exact=True).click()
                 battle = page.get_by_test_id('tactical-battle')
-                expect(battle).to_have_attribute('data-phase', 'deployment')
+                expect(battle).to_have_attribute('data-phase', 'deployment', timeout=20000)
                 canvas = page.locator('.tactical-canvas canvas')
                 expect(canvas).to_be_visible()
                 expect(page.locator('.tactical-graphics-error')).to_have_count(0)

@@ -17,7 +17,7 @@ assert.ok(render, 'find the application render without replacing game rules');
 script = script.slice(0, render.index) + '})();';
 const context = vm.createContext({ console, setTimeout, clearTimeout, performance, URL });
 context.window = context;
-for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js']) {
+for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-battlefield.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, filename), 'utf8'), context, { filename });
 }
 vm.runInContext(script, context, { filename: 'index.inline.js' });
@@ -270,7 +270,7 @@ test('fortification deployment validates complete rotated footprints, water, occ
     { kind: 'hall', x: -30, z: 20 },
     { kind: 'palisade', x: NaN, z: 20 },
     { kind: 'camp', x: 20, z: 20, rotation: Infinity },
-    { kind: 'palisade', x: 42, z: 15, rotation: 45 },
+    { kind: 'palisade', x: Tactics.deploymentZone(battle).xMax - 1, z: 15, rotation: 45 },
     { kind: 'palisade', x: 0, z: -20 },
     { kind: 'camp', x: unit.x, z: unit.z },
   ]) assert.equal(Tactics.placeFortification(battle, command).ok, false);

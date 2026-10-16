@@ -92,6 +92,7 @@
     for (let dx = -structure.w / 2; dx <= structure.w / 2 + 0.01; dx += 0.5) for (let dz = -structure.d / 2; dz <= structure.d / 2 + 0.01; dz += 0.5) {
       const x = structure.x + dx * c - dz * s, z = structure.z + dx * s + dz * c;
       if (battle.layout.water.some((water) => insidePolygon(x, z, water.polygon))) return "堀・川・海を避け、陸地に設置してください。";
+      if (root.TenkaBattlefield?.buildingAt(battle.layout, x, z, .5)) return "町や村の家屋を避けて設置してください。";
     }
     if (battle.structures.some((item) => item.hp > 0 && overlap(structure, { ...item, w: item.w ?? item.width, d: item.d ?? item.depth, rotation: 0 }))) return "城門・城壁・建物・橋と重ならない場所へ設置してください。";
     if ((battle.fortifications || []).some((item) => item.id !== ignoreId && overlap(structure, item))) return "陣地・木柵を重ねて設置することはできません。";
@@ -154,6 +155,7 @@
   }
   function blocked(battle, x, z, type) {
     if (type === "navy") return !isSea(battle, x, z);
+    if (root.TenkaBattlefield?.buildingAt(battle.layout, x, z)) return true;
     for (const water of battle.layout.water) {
       if (insidePolygon(x, z, water.polygon) && !battle.structures.some((structure) => (structure.kind || structure.type) === "bridge" && contains(structure, x, z, 0.8))) return true;
     }
@@ -190,13 +192,14 @@
       battle.availableUnits = Object.fromEntries(TYPES.map((type) => [type, battle.units.filter((unit) => unit.side === "defender" && unit.type === type).reduce((total, unit) => total + unit.maxTroops, 0)]));
       battle.friendlyOfficers = copy(battle.defenderOfficers);
     } else battle.friendlyOfficers = copy(battle.eligibleOfficers);
+    if (options.battlefieldVersion !== 0) root.TenkaBattlefield?.apply(battle);
     return battle;
   }
   function create(options) {
     const battle = original.create(options);
-    return prepare(battle, { attackerFood: Math.max(0, options.state.food - 600), defenderFood: battle.targetCastle.food || 0 });
+    return prepare(battle, { attackerFood: Math.max(0, options.state.food - 600), defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
   }
-  function createDefense(state, threat = state.pendingDefense) {
+  function createDefense(state, threat = state.pendingDefense, options = {}) {
     if (!original || !threat) throw Error("迎撃する侵攻軍が見つかりません。");
     const source = state.castles.find((castle) => castle.id === threat.sourceId);
     const target = state.castles.find((castle) => castle.id === threat.targetId);
@@ -211,7 +214,7 @@
     const battle = original.create({ state: enemyState, sourceId: source.id, targetId: target.id, mode: threat.mode || "siege" });
     battle.stateStamp = stamp(state);
     battle.id = `tactical-defense-${battle.stateStamp}-${source.id}-${target.id}-${battle.mode}`;
-    return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: state.food });
+    return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: state.food, battlefieldVersion: options.battlefieldVersion });
   }
   function deploy(battle, command = {}) {
     if (battle.phase !== "deployment") return reject(battle, "配置を変えられるのは開戦前だけです。");
@@ -223,7 +226,7 @@
     if (!TYPES.includes(type) || !Number.isInteger(troops) || troops < 0 || troops > 600) return reject(battle, "一部隊は五兵科から選び、兵数は零から六百の整数にしてください。");
     const home = side === "defender" ? battle.targetCastle : battle.sourceCastle;
     if (type === "navy" && (!home.coastal || !battle.coastal)) return reject(battle, "水軍は沿岸拠点の海上へ配置してください。");
-    if (blocked(battle, x, z, type)) return reject(battle, "堀・海・城壁を避け、水軍は海上へ配置してください。");
+    if (blocked(battle, x, z, type)) return reject(battle, "堀・川・海・城壁・町や村の家屋を避け、水軍は海上へ配置してください。");
     if (troops > 0 && (battle.fortifications || []).some((item) => item.kind === "palisade" && fortificationContains(item, x, z, 0.8))) return reject(battle, "木柵の上には配置できません。柵の後ろへ部隊を配置してください。");
     const others = battle.units.filter((item) => item.side === side && item.id !== unit.id);
     if (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops) return reject(battle, "出陣できる兵科別の兵数を超えています。");
@@ -245,6 +248,7 @@
     if (!unit || !["move", "attack", "hold", "retreat"].includes(command.order)) return reject(battle, "活動中の自軍部隊と有効な命令を選んでください。");
     const x = command.x ?? unit.x, z = command.z ?? unit.z, box = bounds(battle);
     if (!Number.isFinite(x) || !Number.isFinite(z) || x < box.minX + 1 || x > box.maxX - 1 || z < box.minZ + 1 || z > box.maxZ - 1) return reject(battle, "戦場の範囲内を指定してください。");
+    if (battle.battlefieldVersion && command.order === "move" && blocked(battle, x, z, unit.type)) return reject(battle, "移動先は通行できる地面・橋・浅瀬を指定し、水軍は海上を選んでください。");
     if (command.targetId && !battle.units.some((item) => item.id === command.targetId && item.side !== side) && !(side === "attacker" && battle.structures.some((item) => item.id === command.targetId)) && !(battle.fortifications || []).some((item) => item.id === command.targetId && item.side !== side && item.hp > 0)) return reject(battle, "敵部隊または攻撃可能な施設を選んでください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unit.id);
     Object.assign(selected, { order: command.order, targetId: command.targetId || null, targetX: x, targetZ: command.order === "retreat" ? side === "attacker" ? box.maxZ - 1 : box.minZ + 1 : z, status: command.order === "retreat" ? "retreating" : "fighting" });
@@ -298,6 +302,7 @@
       if (["mountain", "hill", "forest"].includes(battle.terrain) && target.order === "hold") factor *= 0.86;
       if (attacker.ambushUntil > battle.time) factor *= 1.65;
       if (ranged && (battle.terrainFeatures || []).some((feature) => feature.type === "forest" && Math.hypot(target.x - feature.x, target.z - feature.z) <= feature.radius)) factor *= 0.82;
+      factor *= root.TenkaBattlefield?.coverFactor(battle.layout, target, ranged) ?? 1;
       if ((battle.fortifications || []).some((item) => item.kind === "camp" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9)) factor /= 1.12;
       if ((battle.fortifications || []).some((item) => item.kind === "palisade" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9 && segmentHits(item, attacker.x, attacker.z, target.x, target.z))) factor *= ranged ? 0.68 : 0.82;
     }
@@ -327,12 +332,15 @@
     const gates = battle.defending && unit.side === "defender" ? battle.structures.filter((structure) => (structure.kind || structure.type) === "gate" && !structure.passable) : [];
     // A garrison can use its own gate for a sortie; enemies must break it.
     for (const gate of gates) gate.passable = true;
+    const countrysideTarget = root.TenkaBattlefield?.navigationTarget(battle, unit, x, z);
+    if (countrysideTarget) { x = countrysideTarget.x; z = countrysideTarget.z; }
     original.move(battle, unit, x, z);
-    const factor = (FORMATIONS[unit.formation] || FORMATIONS.line).speed;
+    const factor = (FORMATIONS[unit.formation] || FORMATIONS.line).speed * (root.TenkaBattlefield?.movementFactor(battle.layout, { ...unit, x: oldX, z: oldZ }) ?? 1);
     if (factor !== 1) {
       const nextX = oldX + (unit.x - oldX) * factor, nextZ = oldZ + (unit.z - oldZ) * factor;
       if (!blocked(battle, nextX, nextZ, unit.type)) { unit.x = nextX; unit.z = nextZ; }
     }
+    if (root.TenkaBattlefield?.blocked(battle.layout, unit.x, unit.z, 0) && unit.type !== "navy") { unit.x = oldX; unit.z = oldZ; }
     for (const gate of gates) gate.passable = false;
     const obstruction = unit.type !== "navy" && (battle.fortifications || []).find((item) => item.hp > 0 && item.kind === "palisade" && item.side !== unit.side && segmentHits(item, oldX, oldZ, unit.x, unit.z, 0.45));
     if (obstruction) {
@@ -434,7 +442,9 @@
   function verify(state, battle) {
     try {
       if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
-      let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode });
+      const battlefieldVersion = battle.battlefieldVersion ?? 0;
+      if (![0, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
+      let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion });
       for (const record of battle.ledger) {
         if (["deploy", "order", "formation", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
           const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
