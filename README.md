@@ -47,6 +47,8 @@
 
 攻城戦・籠城戦では写実的な城郭の創作復元画像を表示し、「城の画像を大きく見る」で全体を確認できます。七尾城・稲葉山城・小田原城・清洲城に専用画像を用意し、その他の城は山城・平山城・平城・海辺の城の参考復元図と明記します。3Dの城にも木材・石垣・土塁・漆喰・屋根の質感を加えています。画像とテクスチャは同梱しており、外部接続は不要です。発掘図面を照合した完全復元や現地写真ではありません。
 
+戦場内の3D城郭は、反りのある屋根と軒・垂木、木組み・格子窓・下見板、土塁と丸太柵、傾斜した石積みを立体で描画します。城門には観音扉・鉄帯・鉄鋲、物見櫓には柱・筋交い・梯子を設け、山城と石造城郭で形態を変えています。「3D城郭を見る」または「城郭を見る」で城全体へ、「城門に寄る」で門の近くへ視点を切り替え、ドラッグで周囲を見渡せます。「視点を戻す」で戦場全体へ戻ります。枝葉のある樹木と岩・下草、地形に応じた光と影も加えています。城門が破れると扉が倒れ、通路を開いた状態で部隊が進軍します。
+
 七尾城の三つの城門と曲輪の間では、進軍路の幅を含めて城壁の通路を確保します。破った城門の先で見えない壁に停止せず、本丸を占領して落城させられます。敵兵の全滅だけで無条件に城を奪うのではなく、本丸まで進軍する必要があります。
 
 ## 史実とゲーム内の分岐
@@ -77,7 +79,7 @@ node --test tests/*.spec.js
 
 Settings → Pages → Build and deploymentで、Sourceを「GitHub Actions」に設定します。mainへの更新で公開用ワークフローが実行されます。
 
-配信対象は `index.html`、`tenka-portraits.js`、`tenka-castles.js`、`tenka-systems.js`、`tenka-dynasty.js`、`tenka-tactics.js`、`tenka-ui.js`、`tenka-ui.css`、画像と `.nojekyll` です。ゲームを別の場所へコピーする場合もJS・CSSを同じディレクトリに置いてください。
+配信対象は `index.html`、`tenka-portraits.js`、`tenka-castles.js`、`tenka-castle-models.js`、`tenka-battle-environment.js`、`tenka-systems.js`、`tenka-dynasty.js`、`tenka-tactics.js`、`tenka-ui.js`、`tenka-ui.css`、画像と `.nojekyll` です。ゲームを別の場所へコピーする場合もJS・CSSを同じディレクトリに置いてください。
 
 日本列島の海岸線はNatural Earthのパブリックドメイン地理データを簡略化して使用しています。https://www.naturalearthdata.com/about/terms-of-use/
 

@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('output', type=Path, help='Path of the generated standalone HTML')
 args = parser.parse_args()
 html = (root / 'index.html').read_text(encoding='utf-8')
-for name in ('tenka-portraits.js', 'tenka-castles.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js'):
+for name in ('tenka-portraits.js', 'tenka-castles.js', 'tenka-castle-models.js', 'tenka-battle-environment.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js'):
     content = (root / name).read_text(encoding='utf-8')
     if '</script' in content.lower():
         raise ValueError(f'Unsafe inline script terminator in {name}')

@@ -30,9 +30,11 @@
 </head>
   <body>
     <div id="root"><div style="max-width:560px;margin:12vh auto;padding:28px;font-family:serif;color:#304638;background:#f7f5ee;border:1px solid #d9dfcd;border-radius:10px;text-align:center"><h1>天下布武 — 全国版</h1><p>ゲームを読み込んでいます…</p><p>表示が進まない場合は、このページを再読み込みしてください。</p><a href="?reload=nation2">再読み込み</a><noscript><p>ゲームの操作にはJavaScriptが必要です。ブラウザーの設定でJavaScriptを有効にしてください。</p></noscript></div></div>
-    <link rel="stylesheet" href="tenka-ui.css?v=20261015-castle-deployment">
+    <link rel="stylesheet" href="tenka-ui.css?v=20261016-castle-models">
 <script src="tenka-portraits.js?v=20261014-daimyo-portraits"></script>
 <script src="tenka-castles.js?v=20261015-castle-deployment"></script>
+<script src="tenka-castle-models.js?v=20261016-castle-models"></script>
+<script src="tenka-battle-environment.js?v=20261016-castle-models"></script>
 <script src="tenka-systems.js?v=20261015-lifetime-aftermath"></script>
 <script src="tenka-dynasty.js?v=20261015-lifetime-aftermath"></script>
 <script src="tenka-tactics.js?v=20261015-castle-deployment"></script>
@@ -4616,7 +4618,7 @@ void main() {
     (d.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)),
       (d.outputColorSpace = Oc),
       (d.toneMapping = 4),
-      (d.toneMappingExposure = 1.02),
+      (d.toneMappingExposure = 1.10),
       (d.shadowMap.enabled = !0),
       (d.shadowMap.type = 1),
       (d.shadowMap.autoUpdate = !1),
@@ -4643,14 +4645,14 @@ void main() {
       (h.panSpeed = 0.8),
       (h.mouseButtons = { LEFT: is.ROTATE, MIDDLE: is.DOLLY, RIGHT: is.PAN }),
       h.update(),
-      u.add(new mp(`#e5edf0`, `#605b42`, 1.65)));
+      u.add(new mp(`#dce8f0`, `#82745d`, 1.4)));
     let g = new kp(
       c.weather === `雨` ? `#dde6ee` : `#ffe0ab`,
-      c.weather === `雨` ? 1.7 : 3.2,
+      c.weather === `雨` ? 1.4 : 2.65,
     );
     (g.position.set(-48, 48, 24),
       (g.castShadow = !0),
-      g.shadow.mapSize.set(1024, 1024),
+      g.shadow.mapSize.set(window.innerWidth < 600 ? 1024 : 2048, window.innerWidth < 600 ? 1024 : 2048),
       Object.assign(g.shadow.camera, {
         left: -64,
         right: 64,
@@ -4663,7 +4665,7 @@ void main() {
       (g.shadow.normalBias = 0.028),
       (g.shadow.radius = 2),
       u.add(g));
-    let _ = new kp(`#d1e4e8`, 0.6);
+    let _ = new kp(`#d1e4e8`, 0.35);
     (_.position.set(45, 35, -50), u.add(_));
     let v = new Set(),
       y = new Set(),
@@ -4771,7 +4773,7 @@ void main() {
       z = ne(`#8a795b`),
       ce = ne(`#eee6cc`),
       le = ne(`#40534b`, { roughness: 0.9 }),
-      ue = ne(`#b29b70`),
+      ue = ne(`#ffffff`, { map: oe(`ground`, `#bdad91`), roughness: .98 }),
       B = ne(`#c7a582`),
       de = ne(`#303831`),
       fe = ne(`#434b45`, { roughness: 0.44, metalness: 0.32 }),
@@ -4870,17 +4872,19 @@ void main() {
       Ce.translate(0, 0, ((be.minZ ?? be.zMin) + (be.maxZ ?? be.zMax)) / 2));
     let we = Ce.attributes.position,
       Te = new Float32Array(we.count * 3),
-      Ee = new Y(`#899d73`),
-      De = new Y(`#8d9580`);
+      Ee = new Y(`#98a17b`),
+      De = new Y(`#9b8c73`);
     for (let e = 0; e < we.count; e++) {
-      let t = W(we.getX(e), we.getZ(e));
+      const x = we.getX(e), z = we.getZ(e);
+      let t = W(x, z);
       we.setY(e, t);
-      let n = Ee.clone().lerp(De, Wc.smoothstep(t, 3, 13));
+      const slope = Math.hypot(W(x + .5, z) - W(x - .5, z), W(x, z + .5) - W(x, z - .5));
+      let n = Ee.clone().lerp(De, Wc.smoothstep(slope, .4, 1.6));
       (n.multiplyScalar(0.94 + Math.sin(e * 1.739) * 0.045),
         n.toArray(Te, e * 3));
     }
     (Ce.setAttribute(`color`, new Tu(Te, 3)), Ce.computeVertexNormals());
-    const groundTexture = oe("ground", "#c2c1ae");
+    const groundTexture = oe("ground", "#d4cebb");
     groundTexture.repeat.set(36, 36);
     let Oe = ie(
       Ce,
@@ -4889,7 +4893,7 @@ void main() {
         roughness: 0.98,
         map: groundTexture,
         bumpMap: groundTexture,
-        bumpScale: 0.075,
+        bumpScale: 0.04,
       }),
     );
     Oe.castShadow = !1;
@@ -4925,20 +4929,24 @@ void main() {
           ),
         );
       let i = [],
-        a = [];
-      for (let e = 0; e <= 110; e++) {
-        let n = r.getPoint(e / 110),
-          o = r.getTangent(e / 110);
-        for (let e of [-1, 1]) {
-          let r = n.x - ((o.z * t) / 2) * e,
-            a = n.z + ((o.x * t) / 2) * e;
+        a = [],
+        uv = [],
+        pathLength = r.getLength();
+      for (let step = 0; step <= 110; step++) {
+        let n = r.getPoint(step / 110),
+          o = r.getTangent(step / 110);
+        for (let side of [-1, 1]) {
+          let r = n.x - ((o.z * t) / 2) * side,
+            a = n.z + ((o.x * t) / 2) * side;
           i.push(r, ve(r, a) + 0.035, a);
+          uv.push((side + 1) / 2, pathLength * step / 110 / 4);
         }
-        e < 110 &&
-          a.push(e * 2, e * 2 + 1, e * 2 + 2, e * 2 + 1, e * 2 + 3, e * 2 + 2);
+        step < 110 &&
+          a.push(step * 2, step * 2 + 1, step * 2 + 2, step * 2 + 1, step * 2 + 3, step * 2 + 2);
       }
       let o = new Bu();
       (o.setAttribute(`position`, new Ou(i, 3)),
+        o.setAttribute(`uv`, new Ou(uv, 2)),
         o.setIndex(a),
         o.computeVertexNormals());
       let s = ie(o, n);
@@ -5022,13 +5030,24 @@ void main() {
       let t = e.kind || e.type,
         n = e.w || e.width,
         r = e.d || e.depth,
-        i = e.height || 2.5,
-        a = new zl();
+        i = e.height || 2.5;
+      let castleModel = null;
+      if (window.TenkaCastleModels?.createStructure) {
+        try {
+          castleModel = window.TenkaCastleModels.createStructure(
+            { Group: zl, Mesh: Od, BoxGeometry: cf, BufferGeometry: Bu, Float32BufferAttribute: Ou, CylinderGeometry: df, Vector3: J },
+            { structure: e, battle: c, layout: l, materials: { wood: L, darkWood: R, stone: se, earth: z, plaster: ce, roof: le, iron: fe }, heightAt: ve, trackGeometry: I },
+          );
+        } catch { castleModel = null; }
+      }
+      let a = castleModel?.group || new zl();
       (a.position.set(e.x, ve(e.x, e.z), e.z),
         (a.rotation.y = -(e.rotation || 0)),
         u.add(a));
-      let o = null;
-      if (t === `wall` || t === `palisade`) {
+      let o = castleModel?.door || null;
+      if (castleModel) {
+        a.userData.detailedCastle = !0;
+      } else if (t === `wall` || t === `palisade`) {
         let o = n >= r,
           s = Math.max(n, r),
           l = Math.max(1, Math.ceil(s / 0.8));
@@ -5071,7 +5090,7 @@ void main() {
           a.add(o),
           ae(o, L, 0, 1.28, 0.05, n - 0.85, 2.5, 0.2));
         for (let e of [0.6, 1.8]) ae(o, R, 0, e, 0.18, n - 0.9, 0.13, 0.08);
-        (ae(o, fe, 0, 1.2, 0.2, 0.08, 2.2, 0.05), Me(a, new Set([o])));
+        ae(o, fe, 0, 1.2, 0.2, 0.08, 2.2, 0.05);
       } else if (t === `bridge`) {
         for (let e = 0; e < Math.ceil(r / 0.32); e++)
           ae(
@@ -5112,7 +5131,7 @@ void main() {
           ae(a, le, 0, o + (e ? 1.4 : 1.7), 0, n * 0.6, 0.1, 0.09),
           e && ae(a, R, 0, o * 0.75, 0, n + 0.1, 0.14, r + 0.1));
       }
-      o || Me(a);
+      if (o) { Me(o); Me(a, new Set([o])); } else Me(a);
       let s = new Od(I(new cf(n + 0.3, i + 2, r + 0.4)), Fe);
       (s.position.copy(a.position),
         (s.position.y += (i + 2) / 2),
@@ -5131,6 +5150,16 @@ void main() {
         }),
         (s.userData.active = t !== `bridge`));
     }
+    let battleEnvironment = null;
+    if (window.TenkaBattleEnvironment?.create) {
+      try {
+        battleEnvironment = window.TenkaBattleEnvironment.create(
+          { Group: zl, Mesh: Od, InstancedMesh: Rd, Object3D: Rl, CylinderGeometry: df, SphereGeometry: zf, BufferGeometry: Bu, Float32BufferAttribute: Ou, MeshStandardMaterial: qf, Color: Y },
+          { battle: c, layout: l, scene: u, heightAt: ve, waterAt: H, trackGeometry: I, trackMaterial: material => { y.add(material); return material; } },
+        );
+      } catch { battleEnvironment = null; }
+    }
+    if (!battleEnvironment) {
     let Ie = new Rd(I(new ff(0.72, 2.8, 7)), ne(`#45684e`), 130),
       Le = new Rd(I(new df(0.08, 0.12, 1.8, 5)), L, 130);
     ((Ie.castShadow = !0), (Le.castShadow = !0), u.add(Ie, Le));
@@ -5157,6 +5186,7 @@ void main() {
         Le.setMatrixAt(ze++, Re.matrix));
     }
     Ie.count = Le.count = ze;
+    }
     function Be() {
       let e = [new zf(0.047, 6, 4)];
       for (let t of [-0.026, 0, 0.026]) {
@@ -6232,6 +6262,30 @@ void main() {
           ((O = e), (w = !0), (C = !0));
         },
         setView(e) {
+          if (e === `castle` || e === `gate`) {
+            const structures = (c.structures || []).filter(item => (item.kind || item.type) !== `bridge`);
+            if (!structures.length) return;
+            const gates = structures.filter(item => (item.kind || item.type) === `gate`);
+            const gate = gates.sort((left, right) => right.z - left.z)[0];
+            if (e === `gate` && gate) {
+              const width = gate.w || gate.width || 3.1;
+              h.target.set(gate.x, ve(gate.x, gate.z) + 2.2, gate.z);
+              f.position.copy(h.target).add(new J(width + 4, 4.2, width * 1.3 + 8));
+            } else {
+              const xMin = Math.min(...structures.map(item => item.x - (item.w || item.width || 1) / 2));
+              const xMax = Math.max(...structures.map(item => item.x + (item.w || item.width || 1) / 2));
+              const zMin = Math.min(...structures.map(item => item.z - (item.d || item.depth || 1) / 2));
+              const zMax = Math.max(...structures.map(item => item.z + (item.d || item.depth || 1) / 2));
+              const x = (xMin + xMax) / 2, z = (zMin + zMax) / 2;
+              const span = Math.max(12, xMax - xMin, zMax - zMin);
+              const ground = structures.reduce((sum, item) => sum + ve(item.x, item.z), 0) / structures.length;
+              h.target.set(x, Math.max(ve(x, z), ground) + 2.8, z);
+              const framing = Math.max(1, Math.min(1.8, 1.3 / f.aspect));
+              f.position.copy(h.target).add(new J(span * .57 + 6, span * .4 + 6, span * .72 + 9).multiplyScalar(framing));
+            }
+            h.update(); F();
+            return;
+          }
           if (e === "cinematic") {
             const unit =
               (c.units || []).find(
@@ -6292,6 +6346,7 @@ void main() {
           u.traverse((e) => {
             e.isInstancedMesh && e.dispose();
           });
+          battleEnvironment?.dispose?.();
           for (let e of v) e.dispose();
           for (let e of y) e.dispose();
           for (let e of b) e.dispose();
@@ -6702,7 +6757,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
           ],
         }),
         castleView&&(0,Z.jsxs)('figure',{className:'tenka-castle-visual'+(castleExpanded?' expanded':''),children:[
-          (0,Z.jsxs)('header',{children:[(0,Z.jsx)('h3',{children:castleView.name+' ／ '+castleView.type}),(0,Z.jsx)('button',{type:'button',onClick:()=>setCastleExpanded(value=>!value),'aria-expanded':castleExpanded,children:castleExpanded?'城の画像を小さくする':'城の画像を大きく見る'})]}),
+          (0,Z.jsxs)('header',{children:[(0,Z.jsx)('h3',{children:castleView.name+' ／ '+castleView.type}),(0,Z.jsxs)('div',{className:'tenka-castle-view-actions',children:[(0,Z.jsx)('button',{type:'button',className:'tenka-open-castle',onClick:()=>{o.current?.setView('castle');a.current?.scrollIntoView({block:'center'});},children:'3D城郭を見る'}),(0,Z.jsx)('button',{type:'button',onClick:()=>setCastleExpanded(value=>!value),'aria-expanded':castleExpanded,children:castleExpanded?'城の画像を小さくする':'城の画像を大きく見る'})]})]}),
           (0,Z.jsx)('img',{src:castleView.uri,alt:castleView.alt,decoding:'async'}),
           (0,Z.jsx)('figcaption',{children:castleView.caption})
         ]}),
@@ -6746,6 +6801,8 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
                     }),
                     (0, Z.jsxs)(`div`, {
                       children: [
+                        castleView && (0,Z.jsx)(`button`,{className:`tenka-open-castle`,onClick:()=>o.current?.setView(`castle`),children:`城郭を見る`}),
+                        castleView && (0,Z.jsx)(`button`,{onClick:()=>o.current?.setView(`gate`),children:`城門に寄る`}),
                         (0, Z.jsx)(`button`, {
                           onClick: () => o.current?.focusUnit?.(p.current),
                           children: `部隊を近くで見る`,

@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir -p site
           cp index.html preview.png .nojekyll site/
-          cp tenka-portraits.js tenka-castles.js tenka-systems.js tenka-dynasty.js tenka-tactics.js tenka-ui.js tenka-ui.css site/
+          cp tenka-portraits.js tenka-castles.js tenka-castle-models.js tenka-battle-environment.js tenka-systems.js tenka-dynasty.js tenka-tactics.js tenka-ui.js tenka-ui.css site/
           if [ -f battle.png ]; then cp battle.png site/; fi
       - uses: actions/upload-pages-artifact@v3
         with:
