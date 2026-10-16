@@ -47,13 +47,28 @@ test('all 95 real castle layouts build finite textured architecture within a bou
   const terrains = new Set(), kinds = new Set();
   for (const castle of Game.castles) {
     const battle = battleFor(castle.id), before = JSON.stringify(battle), geometries = new Set();
-    let meshes = 0, triangles = 0;
+    let meshes = 0, triangles = 0, principalBuildings = 0;
     terrains.add(castle.terrain);
     for (const structure of battle.structures) {
       kinds.add(structure.kind);
       const model = Models.createStructure(Three, { structure, battle, materials, heightAt: (x, z) => .18 + .02 * x - .01 * z,
         trackGeometry: geometry => geometries.add(geometry) });
       assert.ok(model?.group.isGroup, `${castle.id}/${structure.id}: architecture is created`);
+      const architecture = model.group.userData;
+      if (architecture.castleModel.principal) {
+        principalBuildings++;
+        const roofs = [];
+        model.group.traverse(object => { if (object.name === 'castle-curved-roof') roofs.push(object); });
+        assert.ok(architecture.storeys === 2 || architecture.storeys === 3, `${castle.id}: the main residence has two or three substantial levels`);
+        assert.equal(roofs.length, architecture.storeys, `${castle.id}: every visible storey has a real roof surface`);
+        const ridgeHeights = roofs.map(roof => {
+          const positions = roof.geometry.attributes.position;
+          return Math.max(...Array.from({length:positions.count}, (_, index) => positions.getY(index)));
+        }).sort((left,right) => left-right);
+        assert.ok(ridgeHeights.every((value,index) => index === 0 || value-ridgeHeights[index-1] > .8), `${castle.id}: upper roofs are vertically distinct`);
+      }
+      if (structure.kind === 'watchtower') assert.equal(architecture.architecture, 'enclosed-double-turret');
+      if (structure.kind === 'gate') assert.equal(architecture.architecture, 'fortified-yagura-gate');
       model.group.updateMatrixWorld(true);
       model.group.traverse(object => {
         assert.ok(object.matrixWorld.elements.every(Number.isFinite), `${structure.id}: finite placement`);
@@ -67,6 +82,7 @@ test('all 95 real castle layouts build finite textured architecture within a bou
     // here so decorative masonry cannot silently balloon into millions of faces.
     assert.ok(meshes > 20 && meshes < 4500, `${castle.id}: bounded source meshes (${meshes})`);
     assert.ok(triangles < 60000, `${castle.id}: bounded castle triangles (${triangles})`);
+    assert.ok(principalBuildings > 0 && principalBuildings <= 2, `${castle.id}: a defined principal residence anchors the castle`);
     assert.equal(JSON.stringify(battle), before, `${castle.id}: visual construction leaves routes, collision, HP and units intact`);
     for (const geometry of geometries) geometry.dispose();
   }
@@ -123,7 +139,7 @@ test('roofs have curved lit surfaces and rotated earthwork segments follow the a
   const sloped = Models.createStructure(Three, { structure, battle, materials, heightAt });
   sloped.group.position.set(structure.x, heightAt(structure.x, structure.z), structure.z);
   sloped.group.rotation.y = -structure.rotation; sloped.group.updateMatrixWorld(true);
-  assert.ok(sloped.group.children.length > 20, 'wall has independently grounded segments');
+  assert.ok(sloped.group.children.length > 10, 'thick defensive wall has independently grounded segments');
   for (const segment of sloped.group.children) {
     const base = segment.children[0], points = base.geometry.attributes.position, bottom = new Three.Vector3();
     for (let index = 0; index < 4; index++) bottom.add(new Three.Vector3(points.getX(index), points.getY(index), points.getZ(index)));

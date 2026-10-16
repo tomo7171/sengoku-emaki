@@ -33,6 +33,19 @@
     const mixedFort = profile.wall === "mixed";
     const heightAt = typeof options.heightAt === "function" ? options.heightAt : () => 0;
     const centerHeight = Number(heightAt(structure.x || 0, structure.z || 0)) || 0;
+    const baileys = layout.baileys || [];
+    const mainBailey = baileys.slice().sort((left,right) => {
+      const score = (item) => (Number(item.elevation)||0) + (/本丸|本郭|主郭|上郭|山頂/.test(item.id||item.name||"")?100:0);
+      return score(right)-score(left);
+    })[0];
+    const insideBailey = (item,bailey) => bailey && Math.abs((item.x||0)-(bailey.x||0)) <= Number(bailey.width||bailey.w||0)/2+.1 && Math.abs((item.z||0)-(bailey.z||0)) <= Number(bailey.depth||bailey.d||0)/2+.1;
+    const halls = (battle.structures || layout.structures || []).filter((item) => ["hall","keep"].includes(item.kind||item.type));
+    const mainHall = halls.slice().sort((left,right) => {
+      const score = (item) => (insideBailey(item,mainBailey)?1000:0) + (Number(item.w||item.width)||0)*(Number(item.d||item.depth)||0) - (item.z||0)*.05;
+      return score(right)-score(left);
+    })[0];
+    const principal = kind === "keep" || kind === "hall" && (!mainHall || mainHall.id === structure.id);
+    const innerWall = insideBailey(structure,mainBailey);
     const rotation = -(structure.rotation || 0);
     let meshCount = 0;
     let seed = 2166136261;
@@ -189,50 +202,70 @@
     let door=null;
     if (kind === "wall" || kind === "palisade") {
       const alongX=width>=depth,length=alongX?width:depth,thickness=alongX?depth:width;
-      const count=Math.max(1,Math.ceil(length/(kind==="palisade"?.38:1.25)));
+      // Defensive boundaries retain the exact original footprint and HP. Most
+      // enclosing walls are rendered as substantial roof-capped earthen walls;
+      // outer mountain approaches retain a stout timber stockade.
+      const roofedWall = kind === "wall" || innerWall || !mountain || stoneFort || mixedFort || (Number(profile.baileys)||0)>=4;
+      const count=Math.max(1,Math.ceil(length/(roofedWall?.72:.38)));
       const cell=length/count;
       for(let index=0;index<count;index++) {
         const offset=-length/2+cell*(index+.5),x=alongX?offset:0,z=alongX?0:offset,y=ground(x,z);
         const segment=new THREE.Group();segment.position.set(x,0,z);group.add(segment);
-        if(kind === "palisade") {
-          foundation(segment,alongX?cell:thickness,alongX?thickness:cell,.33,y,false);
-          const h=(height-.19)*(.96+random()*.07),radius=Math.min(thickness*.21,.12);
-          mesh(segment,new THREE.CylinderGeometry(radius*.78,radius,h,5),index%8===0?materials.darkWood:materials.wood,0,y+.20+h/2,0);
-          mesh(segment,new THREE.CylinderGeometry(0,radius*.8,.30,5),materials.wood,0,y+.20+h+.11,0);
-          for(const ratio of [.32,.72]) box(segment,materials.darkWood,0,y+.2+h*ratio,0,alongX?cell+.025:.09,.095,alongX?.09:cell+.025);
+        if(!roofedWall) {
+          foundation(segment,alongX?cell:thickness,alongX?thickness:cell,.48,y,false);
+          const h=(height-.16)*(.98+random()*.04),radius=Math.min(thickness*.28,.16);
+          mesh(segment,new THREE.CylinderGeometry(radius*.90,radius,h,6),index%8===0?materials.darkWood:materials.wood,0,y+.18+h/2,0);
+          mesh(segment,new THREE.CylinderGeometry(0,radius*.91,.27,6),materials.wood,0,y+.18+h+.10,0);
+          for(const ratio of [.27,.65,.88]) box(segment,materials.darkWood,0,y+.2+h*ratio,0,alongX?cell+.025:.12,.13,alongX?.12:cell+.025);
         } else {
-          // Low battered earth/stone revetment and a timber/plaster parapet.
-          const baseHeight=height*(stoneFort?.60:.48);
+          const baseHeight=height*(stoneFort?.38:.28),parapetHeight=height-baseHeight;
           foundation(segment,alongX?cell:thickness,alongX?thickness:cell,baseHeight,y,stoneFort||mixedFort);
-          const parapetHeight=height-baseHeight;
-          const w=alongX?cell:Math.max(.16,thickness*.38),d=alongX?Math.max(.16,thickness*.38):cell;
-          box(segment,mountain?materials.wood:materials.plaster,0,y+baseHeight+parapetHeight/2,0,w,parapetHeight,d);
-          for(const ratio of [.12,.9]) box(segment,materials.darkWood,0,y+baseHeight+parapetHeight*ratio,0,w+.01,.065,d+.025);
-          // Narrow black recesses read as arrow loopholes without broad dark
-          // rectangular windows or modern crenellation.
-          if(alongX) for(const side of [-1,1]) box(segment,materials.darkWood,0,y+baseHeight+parapetHeight*.58,side*(d/2+.009),.075,parapetHeight*.38,.018);
-          else for(const side of [-1,1]) box(segment,materials.darkWood,side*(w/2+.009),y+baseHeight+parapetHeight*.58,0,.018,parapetHeight*.38,.075);
-          const capY=y+height+.035;
-          box(segment,materials.darkWood,0,capY,0,w+.02,.13,d+.11);
+          const bodyThickness=Math.max(.20,thickness*.70);
+          const w=alongX?cell:bodyThickness,d=alongX?bodyThickness:cell;
+          box(segment,mountain&&!stoneFort?materials.earth:materials.plaster,0,y+baseHeight+parapetHeight/2,0,w,parapetHeight,d);
+          for(const ratio of [.10,.92]) box(segment,materials.darkWood,0,y+baseHeight+parapetHeight*ratio,0,w+.012,.09,d+.012);
+          const slitY=y+baseHeight+parapetHeight*.65;
+          if(alongX) for(const side of [-1,1]) {
+            box(segment,materials.darkWood,0,slitY,side*(d/2+.009),.075,parapetHeight*.31,.018);
+            // Timber/stone buttresses stand within the same collision width.
+            if(index%3===0) box(segment,stoneFort?materials.stone:materials.darkWood,0,y+height*.42,side*(thickness*.38),.12,height*.84,thickness*.16);
+          } else for(const side of [-1,1]) {
+            box(segment,materials.darkWood,side*(w/2+.009),slitY,0,.018,parapetHeight*.31,.075);
+            if(index%3===0) box(segment,stoneFort?materials.stone:materials.darkWood,side*(thickness*.38),y+height*.42,0,thickness*.16,height*.84,.12);
+          }
+          // A continuous small gabled tile coping reads as an actual castle
+          // wall rather than a row of thin garden stakes.
+          const halfAcross=thickness*.49,halfAlong=cell*.51,capY=y+height+.03,rise=.24;
+          const v=alongX?[-halfAlong,capY,-halfAcross,halfAlong,capY,-halfAcross,-halfAlong,capY+rise,0,halfAlong,capY+rise,0,-halfAlong,capY,halfAcross,halfAlong,capY,halfAcross]
+            :[-halfAcross,capY,-halfAlong,-halfAcross,capY,halfAlong,0,capY+rise,-halfAlong,0,capY+rise,halfAlong,halfAcross,capY,-halfAlong,halfAcross,capY,halfAlong];
+          const topIndices=alongX?[0,2,1,1,2,3,2,4,3,3,4,5]:[0,1,2,1,3,2,2,3,4,3,5,4];
+          surface(segment,v,[0,0,cell,0,0,.5,cell,.5,0,1,cell,1],topIndices,materials.roof).name="castle-wall-tile-coping";
+          box(segment,materials.roof,0,capY+rise+.035,0,alongX?cell+.02:.12,.08,alongX?.12:cell+.02);
         }
       }
+      group.userData.enclosureStyle=roofedWall?"roofed-earth-wall":"outer-timber-stockade";
     } else if (kind === "gate") {
       // Kabukimon / modest yaguramon: the traversable opening is only occupied
       // by the separate dynamic double-door group, removed by existing combat.
-      const post=.25,clearWidth=Math.max(.3,width-post*2),lintelY=Math.max(2.3,height*.69);
+      const post=.32,clearWidth=Math.max(.3,width-post*2),lintelY=Math.max(2.65,height*.71);
       for(const side of [-1,1]) {
         const x=side*(width/2-post/2);
-        box(group,materials.stone,x,.10,0,post*1.18,.2,Math.min(depth,.65));
-        box(group,materials.darkWood,x,lintelY/2,0,post,lintelY,.32);
-        box(group,materials.wood,x,lintelY*.93,0,post+.11,.16,.52);
-        for(const z of [-.32,.32]) beam(group,materials.wood,[x,.35,z],[x,lintelY*.62,0],.10,.10);
+        box(group,materials.stone,x,.25,0,post*1.10,.5,Math.min(depth,.78));
+        box(group,materials.darkWood,x,lintelY/2,0,post,lintelY,.43);
+        box(group,materials.wood,x,lintelY*.93,0,post+.15,.22,.64);
+        for(const z of [-depth*.36,depth*.36]) {
+          box(group,materials.darkWood,x,lintelY*.36,z,.16,lintelY*.72,.16);
+          beam(group,materials.wood,[x,.36,z],[x,lintelY*.82,0],.14,.14);
+        }
       }
-      box(group,materials.darkWood,0,lintelY,0,width+.18,.28,.42);
-      const upperHeight=Math.max(.55,height*.20);
-      if(!mountain || stoneFort) {
-        wallPanels(group,width*.92,Math.max(.72,depth*.9),lintelY+.14,upperHeight,false);
-        roof(group,width+.95,Math.max(1.7,depth+1.0),lintelY+upperHeight+.10,.66,false);
-      } else roof(group,width+.85,Math.max(1.6,depth+.75),lintelY+.15,.62,false);
+      box(group,materials.darkWood,0,lintelY,0,width+.24,.39,.62);
+      box(group,materials.darkWood,0,lintelY+.24,0,width+.45,.22,Math.max(.83,depth*.94));
+      const upperHeight=Math.max(1.25,height*.31),upperY=lintelY+.34;
+      wallPanels(group,width+.16,Math.max(1.10,depth*.96),upperY,upperHeight,!mountain||stoneFort);
+      for(const side of [-1,1]) box(group,materials.darkWood,0,upperY+.13,side*Math.max(.57,depth*.52),width+.28,.19,.13);
+      roof(group,width+1.4,Math.max(2.15,depth+1.25),upperY+upperHeight-.04,.93,false);
+      group.userData.architecture="fortified-yagura-gate";
+      group.userData.storeys=2;
       door=new THREE.Group();door.name="castle-dynamic-double-door";door.position.y=.10;group.add(door);
       const doorHeight=lintelY-.20;
       for(const side of [-1,1]) {
@@ -259,51 +292,84 @@
         for(let index=0;index<=supports;index++) box(group,materials.wood,x,.57,-depth/2+depth*index/supports,.12,.97,.12);
       }
     } else if(kind === "watchtower") {
-      // Timber watchtowers remain airy and low; no unsupported white keep is
-      // invented for an earth-and-palisade mountain castle.
-      const floorY=Math.max(1.35,height*.48),upperHeight=Math.max(1.0,height-floorY-.65);
-      const postX=width*.39,postZ=depth*.39;
-      for(const x of [-postX,postX]) for(const z of [-postZ,postZ]) {
-        box(group,materials.stone,x,.10,z,.34,.20,.34);
-        box(group,materials.darkWood,x,(floorY+upperHeight)/2,z,.17,floorY+upperHeight,.17);
-      }
-      for(const sign of [-1,1]) {
-        beam(group,materials.wood,[-postX,.20,sign*postZ],[postX,floorY-.12,sign*postZ],.09,.09);
-        beam(group,materials.wood,[postX,.20,sign*postZ],[-postX,floorY-.12,sign*postZ],.09,.09);
-        beam(group,materials.wood,[sign*postX,.20,-postZ],[sign*postX,floorY-.12,postZ],.09,.09);
-      }
-      box(group,materials.wood,0,floorY,0,width+.14,.17,depth+.14);
-      wallPanels(group,width,depth,floorY+.08,upperHeight,false);
-      roof(group,width+.85,depth+.8,floorY+upperHeight+.03,.76,false);
-      const ladderX=width*.27,ladderZ=depth*.22,ladderRun=Math.min(.70,depth*.23);
-      for(const x of [ladderX-.20,ladderX+.20]) beam(group,materials.darkWood,[x,.1,ladderZ+ladderRun],[x,floorY+.15,ladderZ],.055,.06);
-      for(let step=1;step<=6;step++) box(group,materials.wood,ladderX,floorY*step/7,ladderZ+ladderRun*(1-step/7),.43,.055,.07);
+      // Enclosed two-storey corner turret, with a battered low footing and
+      // substantial boarded ground floor instead of an exposed scaffold hut.
+      const baseHeight=stoneFort?1.0:.76,lowerHeight=Math.max(2.0,height*.49),upperHeight=Math.max(1.48,height*.35);
+      foundation(group,width,depth,baseHeight,0,stoneFort||mixedFort);
+      const lowerW=width*.84,lowerD=depth*.84;
+      wallPanels(group,lowerW,lowerD,baseHeight,lowerHeight,false);
+      for(const sign of [-1,1]) box(group,materials.darkWood,0,baseHeight+lowerHeight*.48,sign*(lowerD/2+.10),lowerW+.14,.16,.16);
+      const lowerRoofY=baseHeight+lowerHeight-.02;
+      roof(group,lowerW+.78,lowerD+.78,lowerRoofY,.67,true);
+      const upperY=lowerRoofY+.41,upperW=lowerW*.88,upperD=lowerD*.88;
+      wallPanels(group,upperW,upperD,upperY,upperHeight,!mountain||stoneFort);
+      box(group,materials.darkWood,0,upperY+.09,0,upperW+.15,.15,upperD+.15);
+      roof(group,upperW+.95,upperD+.95,upperY+upperHeight-.03,.91,false);
+      group.userData.architecture="enclosed-double-turret";
+      group.userData.storeys=2;
     } else {
-      // Residence / modest inner keep. A second low roof is reserved for the
-      // explicit keep structure and suitable stone/plains profiles.
-      const foundationHeight=stoneFort?.65:mixedFort?.47:.32;
+      const foundationHeight=principal?(stoneFort?1.22:mixedFort?1.04:.86):(stoneFort?.72:.49);
       foundation(group,width,depth,foundationHeight,0,stoneFort||mixedFort);
-      const buildingWidth=width*.86,buildingDepth=depth*.84;
-      const buildingHeight=Math.max(1.55,height-foundationHeight-.10);
-      const twoStorey=kind==="keep"&&!mountain&&height>=4.5;
-      const lowerHeight=twoStorey?buildingHeight*.62:buildingHeight;
-      wallPanels(group,buildingWidth,buildingDepth,foundationHeight,lowerHeight,!mountain);
-      roof(group,buildingWidth+1.05,buildingDepth+.95,foundationHeight+lowerHeight-.02,Math.min(1.45,buildingDepth*.34),true);
-      // Narrow wooden veranda and corner posts create recess and shadow rather
-      // than a single textured cuboid facade.
-      for(const sign of [-1,1]) {
-        box(group,materials.darkWood,0,foundationHeight+.12,sign*(buildingDepth/2+.16),buildingWidth,.13,.34);
-        for(const x of [-buildingWidth*.45,0,buildingWidth*.45]) box(group,materials.wood,x,foundationHeight+lowerHeight/2,sign*(buildingDepth/2+.22),.075,lowerHeight,.075);
-      }
-      if(twoStorey) {
-        const upperY=foundationHeight+lowerHeight+.63;
-        wallPanels(group,buildingWidth*.60,buildingDepth*.62,upperY,buildingHeight*.40,true);
-        roof(group,buildingWidth*.60+.90,buildingDepth*.62+.90,upperY+buildingHeight*.40-.03,Math.min(1.05,buildingDepth*.25),false);
+      const buildingWidth=width*.87,buildingDepth=depth*.84;
+      if(principal) {
+        // A fortified main residence/turret compound: repeated roof levels and
+        // recessed upper storeys provide a castle silhouette at battle distance.
+        // Mountain versions remain dark boarded medieval towers, rather than
+        // copying a huge white Edo-period keep into every sixteenth-century site.
+        const thirdStorey=!mountain&&width>=9.5&&(stoneFort||mixedFort||(Number(profile.baileys)||0)>=4);
+        const lowerHeight=Math.max(2.30,height*.82),upperHeight=thirdStorey?1.78:2.10;
+        wallPanels(group,buildingWidth,buildingDepth,foundationHeight,lowerHeight,!mountain);
+        const lowerRoofY=foundationHeight+lowerHeight-.06;
+        roof(group,buildingWidth+1.16,buildingDepth+1.04,lowerRoofY,Math.min(1.24,buildingDepth*.31),true);
+        const upperY=lowerRoofY+.62,upperW=buildingWidth*.68,upperD=buildingDepth*.69;
+        wallPanels(group,upperW,upperD,upperY,upperHeight,!mountain||stoneFort);
+        box(group,materials.darkWood,0,upperY+.11,0,upperW+.23,.19,upperD+.23);
+        roof(group,upperW+1.13,upperD+1.03,upperY+upperHeight-.05,Math.min(1.11,upperD*.43),thirdStorey);
+        if(thirdStorey) {
+          const crownY=upperY+upperHeight+.43,crownW=upperW*.65,crownD=upperD*.72;
+          wallPanels(group,crownW,crownD,crownY,1.52,true);
+          roof(group,crownW+1.08,crownD+.98,crownY+1.47,Math.min(.96,crownD*.48),false);
+        }
+        // Heavy veranda, thick corner posts and shallow lower awnings connect
+        // the main tower to the residence rather than leaving an isolated box.
+        for(const sign of [-1,1]) {
+          box(group,materials.darkWood,0,foundationHeight+.14,sign*(buildingDepth/2+.15),buildingWidth,.20,.33);
+          for(const x of [-buildingWidth*.45,0,buildingWidth*.45]) box(group,materials.darkWood,x,foundationHeight+lowerHeight/2,sign*(buildingDepth/2+.18),.13,lowerHeight,.13);
+        }
+        group.userData.architecture=thirdStorey?"principal-three-level-residence":"principal-double-residence";
+        group.userData.storeys=thirdStorey?3:2;
+      } else {
+        // Long barracks / retainers' residence with a dense tiled roof and
+        // defensive timber galleries. These keep subordinate precincts lower.
+        const wallHeight=Math.max(2.20,height*.84);
+        wallPanels(group,buildingWidth,buildingDepth,foundationHeight,wallHeight,!mountain);
+        roof(group,buildingWidth+1.05,buildingDepth+1.01,foundationHeight+wallHeight-.04,Math.min(1.32,buildingDepth*.36),false);
+        for(const sign of [-1,1]) {
+          box(group,materials.darkWood,0,foundationHeight+.14,sign*(buildingDepth/2+.12),buildingWidth,.20,.30);
+          for(const x of [-buildingWidth*.43,buildingWidth*.43]) box(group,materials.darkWood,x,foundationHeight+wallHeight/2,sign*(buildingDepth/2+.14),.14,wallHeight,.14);
+        }
+        group.userData.architecture="retainers-longhouse";
+        group.userData.storeys=1;
       }
     }
     group.name=`realistic-castle-${kind}`;
-    group.userData.castleModel={kind,terrain,wall:profile.wall||"earth",reconstruction:"creative-game-scale",meshCount};
-    return { group, door, extras: { kind, terrain, wall: profile.wall||"earth", meshCount } };
+    // Rendering and picking use the actual architectural silhouette while the
+    // immutable rules structure keeps its original combat height and footprint.
+    group.updateMatrixWorld(true);
+    let visualHeight=0;
+    const corner=new THREE.Vector3();
+    group.traverse((item)=>{
+      if(!item.isMesh) return;
+      item.geometry.computeBoundingBox();
+      const bounds=item.geometry.boundingBox;
+      if(!bounds) return;
+      for(const x of [bounds.min.x,bounds.max.x]) for(const y of [bounds.min.y,bounds.max.y]) for(const z of [bounds.min.z,bounds.max.z]) {
+        corner.set(x,y,z).applyMatrix4(item.matrixWorld);
+        visualHeight=Math.max(visualHeight,corner.y);
+      }
+    });
+    group.userData.castleModel={kind,terrain,wall:profile.wall||"earth",principal,storeys:group.userData.storeys||0,architecture:group.userData.architecture||group.userData.enclosureStyle,reconstruction:"creative-game-scale",meshCount,visualHeight};
+    return { group, door, extras: { kind, terrain, wall: profile.wall||"earth", meshCount, visualHeight } };
   }
 
   root.TenkaCastleModels=Object.freeze({createStructure});

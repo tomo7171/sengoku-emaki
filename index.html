@@ -30,10 +30,12 @@
 </head>
   <body>
     <div id="root"><div style="max-width:560px;margin:12vh auto;padding:28px;font-family:serif;color:#304638;background:#f7f5ee;border:1px solid #d9dfcd;border-radius:10px;text-align:center"><h1>天下布武 — 全国版</h1><p>ゲームを読み込んでいます…</p><p>表示が進まない場合は、このページを再読み込みしてください。</p><a href="?reload=nation2">再読み込み</a><noscript><p>ゲームの操作にはJavaScriptが必要です。ブラウザーの設定でJavaScriptを有効にしてください。</p></noscript></div></div>
-    <link rel="stylesheet" href="tenka-ui.css?v=20261016-castle-models">
+    <link rel="stylesheet" href="tenka-ui.css?v=20261016-castle-precincts">
 <script src="tenka-portraits.js?v=20261014-daimyo-portraits"></script>
 <script src="tenka-castles.js?v=20261015-castle-deployment"></script>
-<script src="tenka-castle-models.js?v=20261016-castle-models"></script>
+<script src="tenka-fortress-materials.js?v=20261016-castle-precincts"></script>
+<script src="tenka-castle-models.js?v=20261016-castle-precincts"></script>
+<script src="tenka-castle-precincts.js?v=20261016-castle-precincts"></script>
 <script src="tenka-battle-environment.js?v=20261016-castle-models"></script>
 <script src="tenka-systems.js?v=20261015-lifetime-aftermath"></script>
 <script src="tenka-dynasty.js?v=20261015-lifetime-aftermath"></script>
@@ -4802,6 +4804,22 @@ void main() {
         }
       } catch { castleTextures?.dispose?.(); castleTextures = null; }
     }
+    let fortressTextures = null;
+    if (window.TenkaFortressMaterials?.createTextures) {
+      try {
+        fortressTextures = window.TenkaFortressMaterials.createTextures(
+          { CanvasTexture: rf, RepeatWrapping: os, SRGBColorSpace: Oc },
+          { anisotropy: Math.min(4, d.capabilities.getMaxAnisotropy()), onLoad: () => { if (!S) { w = C = !0; d.shadowMap.needsUpdate = !0; } } },
+        );
+        for (const [material, name, bump] of [[se, `stone`, .11], [z, `earth`, .055], [ce, `plaster`, .018]]) {
+          if (!fortressTextures?.[name]) continue;
+          fortressTextures[name].repeat.set(.5, .5);
+          material.color.set(`#ffffff`);
+          material.map = material.bumpMap = fortressTextures[name];
+          material.bumpScale = bump; material.needsUpdate = !0;
+        }
+      } catch { fortressTextures?.dispose?.(); fortressTextures = null; }
+    }
     function V(e) {
       return e === `attacker`
         ? c.sourceCastle?.clan || c.attackerArmy?.clan || `oda`
@@ -5132,9 +5150,10 @@ void main() {
           e && ae(a, R, 0, o * 0.75, 0, n + 0.1, 0.14, r + 0.1));
       }
       if (o) { Me(o); Me(a, new Set([o])); } else Me(a);
-      let s = new Od(I(new cf(n + 0.3, i + 2, r + 0.4)), Fe);
+      const visualHeight = Math.max(i + 2, castleModel?.extras?.visualHeight || 0);
+      let s = new Od(I(new cf(n + 0.3, visualHeight, r + 0.4)), Fe);
       (s.position.copy(a.position),
-        (s.position.y += (i + 2) / 2),
+        (s.position.y += visualHeight / 2),
         (s.rotation.y = a.rotation.y),
         (s.visible = !1),
         (s.userData.structureId = e.id),
@@ -5146,9 +5165,37 @@ void main() {
           hit: s,
           base: a.position.y,
           kind: t,
+          visualHeight,
           destroyedAt: null,
         }),
         (s.userData.active = t !== `bridge`));
+    }
+    let castlePrecincts = null;
+    const baileyNameSprites = new zl();
+    baileyNameSprites.name = `castle-bailey-names`;
+    u.add(baileyNameSprites);
+    if (window.TenkaCastlePrecincts?.create && c.mode !== `field`) {
+      try {
+        castlePrecincts = window.TenkaCastlePrecincts.create(
+          { Group: zl, Mesh: Od, BoxGeometry: cf, BufferGeometry: Bu, Float32BufferAttribute: Ou, CylinderGeometry: df, Vector3: J },
+          { battle: c, layout: l, materials: { wood: L, darkWood: R, stone: se, earth: z, plaster: ce, roof: le, iron: fe }, heightAt: ve, trackGeometry: I },
+        );
+        if (castlePrecincts?.group) { u.add(castlePrecincts.group); Me(castlePrecincts.group); }
+        for (const label of castlePrecincts?.labels || []) {
+          const canvas = document.createElement(`canvas`); canvas.width = 256; canvas.height = 80;
+          const context = canvas.getContext(`2d`);
+          context.fillStyle = `rgba(250,245,224,.93)`; context.fillRect(2, 2, 252, 76);
+          context.strokeStyle = `#806a43`; context.lineWidth = 3; context.strokeRect(3, 3, 250, 74);
+          context.fillStyle = `#344a36`; context.font = `bold 34px serif`; context.textAlign = `center`; context.textBaseline = `middle`;
+          context.fillText(label.name, 128, 41);
+          const texture = new rf(canvas); texture.colorSpace = Oc; b.add(texture);
+          const material = new Xu({ map: texture, depthTest: !1, depthWrite: !1, transparent: !0 }); y.add(material);
+          const sprite = new ud(material); sprite.name = `bailey-name-${label.role}`; sprite.userData.baileyRole = label.role;
+          const nearby = (c.structures || []).filter(item => Math.abs(item.x - label.x) < label.width / 2 && Math.abs(item.z - label.z) < label.depth / 2);
+          const top = Math.max(label.y + 3, ...nearby.map(item => ve(item.x, item.z) + (Ne.get(item.id)?.visualHeight || item.height || 3) + 1.4));
+          sprite.position.set(label.x, top, label.z); sprite.scale.set(6.4, 2, 1); sprite.renderOrder = 15; baileyNameSprites.add(sprite);
+        }
+      } catch { if (castlePrecincts?.group) castlePrecincts.group.removeFromParent(); castlePrecincts = null; }
     }
     let battleEnvironment = null;
     if (window.TenkaBattleEnvironment?.create) {
@@ -6134,6 +6181,7 @@ void main() {
         t.selectedStructureId !== void 0 && (selectedStructureId = t.selectedStructureId),
         t.deploymentTool !== void 0 && (deploymentTool = t.deploymentTool),
         t.placementRotation !== void 0 && (placementRotation = Number(t.placementRotation) || 0),
+        t.baileyNamesVisible !== void 0 && (baileyNameSprites.visible = !!t.baileyNamesVisible),
         t.placement !== void 0 && (k = t.placement),
         t.rangeVisible !== void 0 && (A = t.rangeVisible));
       syncFortifications();
@@ -6262,6 +6310,15 @@ void main() {
           ((O = e), (w = !0), (C = !0));
         },
         setView(e) {
+          for (const sprite of baileyNameSprites.children) sprite.visible = e !== `gate` && e !== `cinematic` && (!e.startsWith(`bailey-`) || e === `bailey-${sprite.userData.baileyRole}`);
+          if (e.startsWith(`bailey-`)) {
+            const label = castlePrecincts?.labels?.find(item => `bailey-${item.role}` === e);
+            if (!label) return;
+            const extent = Math.max(label.width, label.depth, 12), framing = Math.max(1, 1.1 / f.aspect);
+            h.target.set(label.x, label.y + 3.8, label.z);
+            f.position.copy(h.target).add(new J(extent * .7 + 4, extent * .55 + 4, extent * .8 + 7).multiplyScalar(framing));
+            h.update(); F(); return;
+          }
           if (e === `castle` || e === `gate`) {
             const structures = (c.structures || []).filter(item => (item.kind || item.type) !== `bridge`);
             if (!structures.length) return;
@@ -6318,6 +6375,7 @@ void main() {
             F());
         },
         focusUnit(e) {
+          for (const sprite of baileyNameSprites.children) sprite.visible = !1;
           let t = (c.units || []).find((t) => t.id === e);
           t &&
             ((O = e),
@@ -6328,8 +6386,10 @@ void main() {
             (C = !0));
         },
         resetView() {
+          for (const sprite of baileyNameSprites.children) sprite.visible = !0;
           (h.target.copy(m), f.position.copy(p), h.update(), F());
         },
+        setBaileyNames(visible) { baileyNameSprites.visible = !!visible; if (visible) for (const sprite of baileyNameSprites.children) sprite.visible = !0; F(); },
         dispose() {
           ((S = !0),
             cancelAnimationFrame(E),
@@ -6343,6 +6403,7 @@ void main() {
             d.domElement.removeEventListener(`webglcontextrestored`, $t));
           for (let e of x) ((e.onload = null), (e.onerror = null));
           castleTextures?.dispose?.();
+          fortressTextures?.dispose?.();
           u.traverse((e) => {
             e.isInstancedMesh && e.dispose();
           });
@@ -6379,6 +6440,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       deploymentToolRef = (0,Q_.useRef)('unit'),
       selectedStructureRef = (0,Q_.useRef)(null),
       placementRotationRef = (0,Q_.useRef)(0),
+      baileyNamesRef = (0,Q_.useRef)(true),
       m = (0, Q_.useRef)(`move`),
       h = (0, Q_.useRef)({}),
       [g, _] = (0, Q_.useState)(e),
@@ -6388,6 +6450,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       [selectedStructureId,setSelectedStructureId] = (0,Q_.useState)(null),
       [placementRotation,setPlacementRotation] = (0,Q_.useState)(0),
       [castleExpanded,setCastleExpanded] = (0,Q_.useState)(false),
+      [showBaileyNames,setShowBaileyNames] = (0,Q_.useState)(true),
       [S, C] = (0, Q_.useState)(!1),
       [w, T] = (0, Q_.useState)(1),
       [E, D] = (0, Q_.useState)(
@@ -6411,6 +6474,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       ie = g.phase === `fighting`,
       ae = g.phase === `finished`,
       castleView = window.TenkaCastles?.scene(g),
+      baileyViews = (window.TenkaCastlePrecincts?.describe(g) || []).filter(item => item.role !== `support`),
       oe = g.friendlyOfficers || e.friendlyOfficers || g.eligibleOfficers || e.eligibleOfficers || [],
       L = (e) =>
         oe.find((t) => t.id === e?.commanderId) || {
@@ -6429,6 +6493,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
             selectedStructureId: selectedStructureRef.current,
             deploymentTool: deploymentToolRef.current,
             placementRotation: placementRotationRef.current,
+            baileyNamesVisible: baileyNamesRef.current,
           });
         } catch {
           k(
@@ -6803,6 +6868,8 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
                       children: [
                         castleView && (0,Z.jsx)(`button`,{className:`tenka-open-castle`,onClick:()=>o.current?.setView(`castle`),children:`城郭を見る`}),
                         castleView && (0,Z.jsx)(`button`,{onClick:()=>o.current?.setView(`gate`),children:`城門に寄る`}),
+                        castleView && baileyViews.map(label => (0,Z.jsx)(`button`,{type:`button`,title:label.originalName,onClick:()=>o.current?.setView(`bailey-${label.role}`),children:label.name+`を見る`},label.baileyId)),
+                        castleView && (0,Z.jsx)(`button`,{type:`button`,'aria-pressed':showBaileyNames,onClick:()=>{const next=!baileyNamesRef.current;baileyNamesRef.current=next;setShowBaileyNames(next);o.current?.setBaileyNames(next);},children:showBaileyNames?`曲輪名を隠す`:`曲輪名を表示`}),
                         (0, Z.jsx)(`button`, {
                           onClick: () => o.current?.focusUnit?.(p.current),
                           children: `部隊を近くで見る`,

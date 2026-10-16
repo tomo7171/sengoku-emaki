@@ -2,7 +2,7 @@
 """Check the actual 3D castle, gate breach, and siege settlement in Chromium.
 
 Serve this repository, then run:
-  python tests/castle-renderer-browser.py --url http://127.0.0.1:8032
+  python tests/castle-renderer-browser.py --url http://127.0.0.1:8047
 
 Campaign fixtures use production save validation. Battles and cameras are opened
 through the actual UI. A test-only route exposes the private renderer and model
@@ -43,7 +43,7 @@ def instrumented_html():
     html = (ROOT / 'index.html').read_text()
     registry = 'let Ne = new Map(),'
     assert html.count(registry) == 1, 'Find the production castle model registry'
-    html = html.replace(registry, 'let Ne = window.__castleTestEntries = new Map(),', 1)
+    html = html.replace(registry, 'let Ne = (window.__castleTestScene=u,window.__castleTestCamera=f,window.__castleTestEntries=new Map()),', 1)
     attach = 'e.appendChild(d.domElement));'
     renderer_start = html.index('function G_(')
     attach_start = html.index(attach, renderer_start)
@@ -51,6 +51,14 @@ def instrumented_html():
     marker = '(0,zv.createRoot)(document.getElementById(`root`))'
     assert marker in html, 'Find the production React bootstrap'
     observe = """
+const castleTestTextureFactory=window.TenkaFortressMaterials.createTextures;
+window.TenkaFortressMaterials={...window.TenkaFortressMaterials,createTextures:(...args)=>{
+ const maps=castleTestTextureFactory(...args);
+ window.__castleTestFortressMaps=maps;
+ window.__castleTestFortressDecoded=null;
+ maps?.ready?.then(decoded=>{if(window.__castleTestFortressMaps===maps)window.__castleTestFortressDecoded=decoded;});
+ return maps;
+}};
 const castleTestOriginalRenderer=G_;
 G_=(mount,options)=>{
  const renderer=castleTestOriginalRenderer(mount,options);
@@ -69,16 +77,16 @@ G_=(mount,options)=>{
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url', default='http://127.0.0.1:8032')
+    parser.add_argument('--url', default='http://127.0.0.1:8047')
     parser.add_argument('--chromium', default='/usr/bin/chromium')
-    parser.add_argument('--screenshots', default='/tmp/tenka-castle-renderer')
+    parser.add_argument('--screenshots', default='/tmp/tenka-fortress-browser')
     parser.add_argument('--widths', default='1440,390')
     args = parser.parse_args()
     base = args.url.rstrip('/')
     screenshots = Path(args.screenshots)
     screenshots.mkdir(parents=True, exist_ok=True)
     html = instrumented_html()
-    results, errors, render_stats = [], [], []
+    results, errors, render_stats, architecture_stats = [], [], [], []
 
     def passed(message):
         results.append(message)
@@ -119,6 +127,37 @@ def main():
                 expect(page.locator('.tactical-graphics-error')).to_have_count(0)
                 page.wait_for_function('window.__castleTestEntries?.size>0')
                 assert page.evaluate('!!window.TenkaCastleModels'), 'The detailed 3D castle module is loaded'
+                page.wait_for_function('window.__castleTestFortressDecoded?.length===3&&window.__castleTestFortressDecoded.every(Boolean)')
+                textures = page.evaluate('Object.fromEntries(["stone","earth","plaster"].map(name=>[name,{name:window.__castleTestFortressMaps[name].name,width:window.__castleTestFortressMaps[name].image.width,height:window.__castleTestFortressMaps[name].image.height}]))')
+                assert all(item['width'] >= 512 and item['height'] >= 512 for item in textures.values()), textures
+                passed(f'{width}px {case["targetId"]}: three new stone, earth and plaster material photographs decode')
+                architecture = page.evaluate("""()=>{
+ const entries=[...window.__castleTestEntries].map(([id,entry])=>({id,...entry.group.userData.castleModel,
+  hitHeight:entry.hit.geometry.parameters.height,hitCenter:entry.hit.position.y-entry.group.position.y}));
+ const precinct=window.__castleTestScene.getObjectByName('castle-precinct-earthworks');
+ const names=window.__castleTestScene.getObjectByName('castle-bailey-names');
+ return {entries,precinct:precinct?.userData.precincts,precinctMeshes:precinct?.children.length,
+  labels:names?.children.map(sprite=>({name:sprite.name,role:sprite.userData.baileyRole})),
+  baileys:window.__castleTestBattle.layout.baileys.length};
+}""")
+                principal = [item for item in architecture['entries'] if item.get('principal')]
+                assert principal and all(item['storeys'] >= 2 for item in principal), principal
+                assert all(item['storeys'] >= 2 for item in architecture['entries'] if item['kind'] in ['gate', 'watchtower']), architecture
+                assert all(item['hitHeight'] + .001 >= item['visualHeight'] for item in architecture['entries']), architecture
+                assert all(math.isclose(item['hitCenter'], item['hitHeight'] / 2, abs_tol=.001) for item in architecture['entries']), architecture
+                assert architecture['precinct'] and architecture['precinctMeshes'] > 0, architecture
+                assert architecture['precinct']['earthSegments'] + architecture['precinct']['stoneSegments'] > 0, architecture
+                if case['targetId'] == 'nanao':
+                    assert architecture['precinct']['earthSegments'] > 0 and architecture['precinct']['stoneSegments'] > 0, architecture
+                if case['targetId'] in ['nanao', 'kiyosu']:
+                    assert any(item.get('architecture') == 'roofed-earth-wall' for item in architecture['entries']), architecture
+                assert len(architecture['labels']) == architecture['baileys'], architecture
+                roles = [label['role'] for label in architecture['labels']]
+                assert roles.count('honmaru') == 1 and roles.count('ninomaru') <= 1 and roles.count('sannomaru') <= 1, roles
+                if case['targetId'] == 'nanao':
+                    assert all(role in roles for role in ['honmaru', 'ninomaru', 'sannomaru', 'support']), roles
+                architecture_stats.append({'width': width, 'castle': case['targetId'], 'principal': principal, 'precinct': architecture['precinct']})
+                passed(f'{width}px {case["targetId"]}: multi-storey hall, turrets and gates have matching higher hitboxes; retaining masonry and bailey labels render')
                 for label, suffix in [('城郭を見る', 'castle'), ('城門に寄る', 'gate')]:
                     page.get_by_role('button', name=label, exact=True).click()
                     canvas.scroll_into_view_if_needed()
@@ -127,6 +166,29 @@ def main():
                     statistics = page.evaluate('({calls:window.__castleTestWebglRenderer.info.render.calls,triangles:window.__castleTestWebglRenderer.info.render.triangles,geometries:window.__castleTestWebglRenderer.info.memory.geometries,textures:window.__castleTestWebglRenderer.info.memory.textures})')
                     render_stats.append({'width': width, 'castle': case['targetId'], 'camera': suffix, **statistics})
                 passed(f'{width}px {case["targetId"]}: actual siege UI renders castle and gate camera views')
+
+                page.get_by_role('button', name='城郭を見る', exact=True).click()
+                page.get_by_role('button', name='曲輪名を隠す', exact=True).click()
+                page.wait_for_function("window.__castleTestScene.getObjectByName('castle-bailey-names').visible===false")
+                page.get_by_role('button', name='曲輪名を表示', exact=True).click()
+                page.wait_for_function("window.__castleTestScene.getObjectByName('castle-bailey-names').visible===true")
+                last_camera = page.evaluate('window.__castleTestCamera.position.toArray()')
+                for role, label in [('honmaru', '本丸'), ('ninomaru', '二の丸'), ('sannomaru', '三の丸')]:
+                    button = page.get_by_role('button', name=label + 'を見る', exact=True)
+                    if role not in roles:
+                        expect(button).to_have_count(0)
+                        continue
+                    button.click()
+                    canvas.scroll_into_view_if_needed()
+                    page.wait_for_timeout(350)
+                    position = page.evaluate('window.__castleTestCamera.position.toArray()')
+                    assert math.dist(position, last_camera) > .1, (role, position, last_camera)
+                    last_camera = position
+                    if case['targetId'] == 'nanao':
+                        page.locator('.tactical-canvas').screenshot(path=str(screenshots / f'{width}-{case["targetId"]}-{role}.png'))
+                passed(f'{width}px {case["targetId"]}: bailey name toggle and existing honmaru/ninomaru/sannomaru camera controls work')
+                page.get_by_role('button', name='城門に寄る', exact=True).click()
+                canvas.scroll_into_view_if_needed()
 
                 gate = page.evaluate("""()=>{
  const gate=window.__castleTestBattle.structures.find(s=>(s.kind||s.type)==='gate');
@@ -154,10 +216,20 @@ def main():
                 page.evaluate('window.__castleTestRenderer.update(window.__castleTestOriginalBattle)')
                 passed(f'{width}px {case["targetId"]}: breached gate lowers its door and retains an open frame')
 
-                if case['targetId'] == 'nanao' and width > 600:
+                if case['targetId'] == 'nanao':
+                    page.get_by_role('button', name='曲輪名を隠す', exact=True).click()
+                    page.wait_for_function("window.__castleTestScene.getObjectByName('castle-bailey-names').visible===false")
                     page.get_by_role('button', name='戦闘開始', exact=True).click()
                     expect(battle).to_have_attribute('data-phase', 'fighting')
+                    page.wait_for_timeout(1000)
+                    assert page.evaluate("window.__castleTestScene.getObjectByName('castle-bailey-names').visible===false"), 'Hidden bailey labels remain hidden across battle ticks'
+                    page.get_by_role('button', name='曲輪名を表示', exact=True).click()
+                    page.wait_for_function("window.__castleTestScene.getObjectByName('castle-bailey-names').visible===true")
+                    assert page.evaluate("window.__castleTestScene.getObjectByName('castle-bailey-names').children.some(sprite=>sprite.visible)"), 'Showing bailey labels restores actual sprites from the gate view'
                     page.get_by_role('button', name='一時停止', exact=True).click()
+                    passed(f'{width}px nanao: hidden bailey labels persist through battle start and ticks, then can be shown again')
+
+                if case['targetId'] == 'nanao' and width > 600:
                     settled = page.evaluate("""()=>{
  const G=window.TenkaGame,b=JSON.parse(JSON.stringify(window.__castleTestBattle));
  let steps=0;
@@ -184,7 +256,7 @@ def main():
                 context.close()
         browser.close()
     assert not errors, errors
-    print(json.dumps({'checks': results, 'browser_errors': errors, 'render_stats': render_stats, 'screenshots': str(screenshots)}, ensure_ascii=False, indent=2), flush=True)
+    print(json.dumps({'checks': results, 'browser_errors': errors, 'render_stats': render_stats, 'architecture_stats': architecture_stats, 'screenshots': str(screenshots)}, ensure_ascii=False, indent=2), flush=True)
 
 
 if __name__ == '__main__':
