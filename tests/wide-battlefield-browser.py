@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the expanded battle landscape and player deployment in the actual UI.
+"""Check the tenfold regional battlefield and player deployment in the actual UI.
 
 Run against a locally served repository. Observation hooks exist only in the
 test's HTML response; production code exposes no renderer internals. The same
@@ -23,6 +23,9 @@ def instrumented_html():
     assert html.count(registry) == 1, 'Find the actual battle renderer'
     html = html.replace(registry, 'let Ne=(window.__wideScene=u,window.__wideCamera=f,window.__wideControls=h,window.__wideHeightAt=ve,window.__wideEntries=new Map()),', 1)
     renderer_start = html.index('function G_(')
+    attach_marker = 'e.appendChild(d.domElement));'
+    position = html.index(attach_marker, renderer_start)
+    html = html[:position] + html[position:].replace(attach_marker, attach_marker + '\n    window.__wideWebglRenderer=d;', 1)
     ground_marker = 'Oe.castShadow = !1;'
     position = html.index(ground_marker, renderer_start)
     html = html[:position] + html[position:].replace(ground_marker, ground_marker + '\n    window.__wideGround=Oe;', 1)
@@ -53,9 +56,14 @@ G_=(mount,options)=>{
     return html.replace(marker, observe + marker, 1)
 
 
-FIXTURE = """({mode,sourceId,targetId})=>{
+FIXTURE = """({mode,sourceId,targetId,opposingClan})=>{
  const G=window.TenkaGame,state=G.newGame();
  const source=state.castles.find(c=>c.id===sourceId),target=state.castles.find(c=>c.id===targetId);
+ if(opposingClan){
+  target.clan=opposingClan;target.clanName=G.clans[opposingClan].name;target.color=G.clans[opposingClan].color;
+  for(const officer of state.officers)if(officer.castleId===targetId)officer.castleId=sourceId;
+  state.armies[targetId].commanderId=null;
+ }
  state.playerClan=mode==='defense'?target.clan:source.clan;
  state.selectedCastleId=targetId;state.alliances=[];
  if(mode==='defense')state.pendingDefense={sourceId,targetId,mode:'siege',clan:source.clan};
@@ -66,10 +74,12 @@ FIXTURE = """({mode,sourceId,targetId})=>{
 CHOOSE_WIDE_POSITION = """()=>{
  const b=window.__wideBattle,T=window.TenkaTactics,side=b.playerSide||'attacker';
  const units=b.units.filter(u=>u.side===side&&u.troops>0&&u.type!=='navy'),unit=units[1]||units[0],zone=T.deploymentZone(b);
- const candidates=side==='attacker'?[[-76,57],[76,78],[0,72],[-80,72],[48,72]]:[[-72,-76],[72,-76],[0,-82],[-60,-62]];
- for(let z=Math.ceil(zone.zMin+4);z<zone.zMax-4;z+=6)for(let x=Math.ceil(zone.xMin+4);x<zone.xMax-4;x+=6)candidates.push([x,z]);
+ const depth=zone.zMax-zone.zMin,width=zone.xMax-zone.xMin;
+ const candidates=side==='attacker'?[[150,150],[-150,150],[0,180],[180,90]]:[[150,-160],[-150,-160],[0,-200],[180,-90]];
+ for(const fz of[.4,.6,.8,.2])for(const fx of[.5,.7,.3,.85,.15])candidates.push([Math.round(zone.xMin+width*fx),Math.round(zone.zMin+depth*fz)]);
+ for(let z=Math.ceil(zone.zMin+15);z<zone.zMax-15;z+=14)for(let x=Math.ceil(zone.xMin+15);x<zone.xMax-15;x+=14)candidates.push([x,z]);
  for(const[x,z]of candidates){
-  if(x>=-44&&x<=44&&z>=-50&&z<=42)continue;
+  if(x>=-88&&x<=88&&z>=-100&&z<=84)continue;
   if(T.deploy(b,{unitId:unit.id,x,z}).ok)return{unitId:unit.id,x,z,originalX:unit.x,originalZ:unit.z};
  }throw Error('No legal deployment point outside the old battlefield');
 }"""
@@ -77,21 +87,29 @@ CHOOSE_WIDE_POSITION = """()=>{
 LANDSCAPE = """()=>{
  const b=window.__wideBattle,l=b.layout.landscape,env=window.__wideEnvironment,W=window.TenkaBattlefield;
  const meshInfo=env.meshes.map(mesh=>({name:mesh.name,visible:mesh.visible,count:mesh.isInstancedMesh?mesh.count:mesh.geometry.attributes.position.count}));
- const houses=l.settlements.flatMap(s=>s.houses),points=h=>[[h.x,h.z],...[[-1,-1],[-1,1],[1,-1],[1,1]].map(([x,z])=>[h.x+x*h.w/2,h.z+z*h.d/2])];
+ const houses=l.settlements.flatMap(s=>s.houses),points=h=>[[h.x,h.z],...[[-1,-1],[-1,1],[1,-1],[1,1]].map(([x,z])=>{
+  const r=h.rotation||0,dx=x*h.w/2,dz=z*h.d/2;return[h.x+dx*Math.cos(r)-dz*Math.sin(r),h.z+dx*Math.sin(r)+dz*Math.cos(r)];
+ })];
  const seaHouses=houses.filter(h=>points(h).some(([x,z])=>l.seas.some(sea=>W.inside(x,z,sea.polygon))));
  const seaFields=l.fields.filter(f=>points(f).some(([x,z])=>l.seas.some(sea=>W.inside(x,z,sea.polygon))));
  const water=[];window.__wideScene.traverse(mesh=>{
   const source=mesh.userData.wideTestWater;if(!source)return;
   const positions=mesh.geometry.attributes.position;let mismatched=0,heightError=0;
+  const edgeDistance=(x,z,a,b)=>{
+   const dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz||1)));
+   return Math.hypot(x-a[0]-t*dx,z-a[1]-t*dz);
+  };
   for(let i=0;i<positions.count;i++){
    const x=positions.getX(i),z=positions.getZ(i);
-   if(!source.polygon.some(p=>Math.hypot(x-p[0],z-p[1])<.001))mismatched++;
+   if(!W.inside(x,z,source.polygon)&&!source.polygon.some((p,index)=>edgeDistance(x,z,p,source.polygon[(index+1)%source.polygon.length])<.001))mismatched++;
    heightError=Math.max(heightError,Math.abs(positions.getY(i)-(source.type==='sea'?-.12:window.__wideHeightAt(x,z)-.12)));
   }
   water.push({type:source.type,visible:mesh.visible,vertices:positions.count,mismatched,heightError});
  });
  window.__wideGround.geometry.computeBoundingBox();const box=window.__wideGround.geometry.boundingBox;
- return{bounds:b.layout.bounds,version:b.battlefieldVersion,peaks:l.peaks.length,valleys:l.valleys.length,rivers:l.rivers.length,fields:l.fields.length,houses:houses.length,
+ return{bounds:b.layout.bounds,version:b.battlefieldVersion,landscapeVersion:l.version,profile:l.profile,armyDeployment:b.armyDeployment,
+  peaks:l.peaks.length,valleys:l.valleys.length,rivers:l.rivers.length,fields:l.fields.length,houses:houses.length,
+  paddy:l.fields.filter(f=>f.kind==='paddy').length,forests:l.forests.length,
   stats:env.stats,meshes:meshInfo,seaHouses:seaHouses.map(h=>h.id),seaFields:seaFields.map(f=>f.id),water,
   ground:{min:box.min.toArray(),max:box.max.toArray()}};
 }"""
@@ -107,7 +125,7 @@ NEXT_UNIT_POSITION = """unitId=>{
  const b=window.__wideBattle,u=b.units.find(u=>u.id===unitId);
  for(const[dx,dz]of[[12,0],[9,-7],[-9,-7],[7,8],[-12,0]]){
   const x=u.x+dx,z=u.z+dz;
-  if(x>=-44&&x<=44&&z>=-50&&z<=42)continue;
+  if(x>=-88&&x<=88&&z>=-100&&z<=84)continue;
   if(window.TenkaTactics.deploy(b,{unitId,x,z}).ok)return{x,z};
  }throw Error('No nearby legal pointer destination outside the old bounds');
 }"""
@@ -126,18 +144,19 @@ def canvas_pixel(page, canvas, x, z, lift=0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url', default='http://127.0.0.1:8057')
+    parser.add_argument('--url', default='http://127.0.0.1:8058')
     parser.add_argument('--chromium', default='/usr/bin/chromium')
-    parser.add_argument('--screenshots', default='/tmp/tenka-wide-battlefield')
+    parser.add_argument('--screenshots', default='/tmp/tenka-regional-battlefield')
     parser.add_argument('--widths', default='1440,390')
     parser.add_argument('--modes', default='field,siege,defense')
     parser.add_argument('--skip-coastal', action='store_true')
+    parser.add_argument('--skip-ryukyu', action='store_true')
     args = parser.parse_args()
     base = args.url.rstrip('/')
     shots = Path(args.screenshots)
     shots.mkdir(parents=True, exist_ok=True)
     html = instrumented_html()
-    checks, errors, landscapes = [], [], []
+    checks, errors, landscapes, render_stats = [], [], [], []
 
     def passed(message):
         checks.append(message)
@@ -149,6 +168,8 @@ def main():
             cases = [{'mode': mode, 'sourceId': 'inabayama' if mode == 'defense' else 'kiyosu', 'targetId': 'kiyosu' if mode == 'defense' else 'inabayama'} for mode in args.modes.split(',')]
             if width > 600 and not args.skip_coastal:
                 cases.append({'mode': 'siege', 'sourceId': 'kakunodate', 'targetId': 'wakimoto', 'coastal': True})
+            if width > 600 and not args.skip_ryukyu:
+                cases.append({'mode': 'siege', 'sourceId': 'zakimi', 'targetId': 'shuri', 'opposingClan': 'oda', 'coastal': True})
             for case in cases:
                 label = f'{width}px {case["mode"]} {case["targetId"]}'
                 context = browser.new_context(viewport={'width': width, 'height': 1050 if width > 600 else 844})
@@ -176,23 +197,35 @@ def main():
                 expect(page.locator('.tactical-graphics-error')).to_have_count(0)
                 page.wait_for_function('window.__wideEnvironment?.stats.houses>0')
                 landscape = page.evaluate(LANDSCAPE)
-                assert landscape['bounds']['minX'] == -88 and landscape['bounds']['maxX'] == 88, landscape
-                assert landscape['bounds']['minZ'] == -100 and landscape['bounds']['maxZ'] == 84, landscape
+                bounds = landscape['bounds']
+                area = (bounds['maxX'] - bounds['minX']) * (bounds['maxZ'] - bounds['minZ'])
+                assert math.isclose(area, 176 * 184 * 10, rel_tol=1e-10), area
+                assert bounds['minX'] < -88 and bounds['maxX'] > 88 and bounds['minZ'] < -100 and bounds['maxZ'] > 84, bounds
+                assert landscape['version'] == 2 and landscape['landscapeVersion'] == 2, landscape
+                assert landscape['profile']['id'] and landscape['profile']['label'], landscape
+                expected_profile = {'inabayama': 'mountain', 'kiyosu': 'plain', 'wakimoto': 'northern-coast', 'shuri': 'ryukyu'}[case['targetId']]
+                assert landscape['profile']['id'] == expected_profile, landscape['profile']
                 assert landscape['peaks'] >= 2 and landscape['valleys'] >= 1 and landscape['rivers'] >= 1, landscape
-                assert landscape['fields'] == 15 and landscape['houses'] == 20, landscape
+                assert landscape['fields'] > 15 and landscape['houses'] > 20, landscape
                 assert landscape['stats']['fields'] == landscape['fields'] and landscape['stats']['houses'] == landscape['houses'], landscape
+                side = page.evaluate('window.__wideBattle.playerSide||"attacker"')
+                enemy = 'defender' if side == 'attacker' else 'attacker'
+                army_text = toolbar.locator('.tenka-army-deployment')
+                expect(army_text).to_contain_text(landscape['profile']['label'])
+                expect(army_text).to_contain_text('自軍の初期陣：' + landscape['armyDeployment'][side]['name'])
+                expect(army_text).to_contain_text('敵軍の布陣：' + landscape['armyDeployment'][enemy]['name'])
                 for mesh_name in ['terrain-following-paddy-fields', 'terrain-following-dry-fields', 'settlement-stone-foundations', 'village-deep-thatched-hip-roofs', 'ordered-rice-and-vegetable-crops']:
                     assert any(mesh['name'] == mesh_name and mesh['visible'] and mesh['count'] > 0 for mesh in landscape['meshes']), (mesh_name, landscape)
                 assert any(water['type'] == 'river' and water['visible'] and water['vertices'] >= 3 for water in landscape['water']), landscape
                 assert all(water['mismatched'] == 0 and water['heightError'] < .02 for water in landscape['water']), landscape['water']
-                assert landscape['ground']['min'][0] <= -88 and landscape['ground']['max'][0] >= 88, landscape
-                assert landscape['ground']['min'][2] <= -100 and landscape['ground']['max'][2] >= 84, landscape
+                assert landscape['ground']['min'][0] <= bounds['minX'] + .001 and landscape['ground']['max'][0] >= bounds['maxX'] - .001, landscape
+                assert landscape['ground']['min'][2] <= bounds['minZ'] + .001 and landscape['ground']['max'][2] >= bounds['maxZ'] - .001, landscape
                 assert landscape['ground']['max'][1] - landscape['ground']['min'][1] > 10, landscape
                 assert not landscape['seaHouses'] and not landscape['seaFields'], landscape
                 if case.get('coastal'):
                     assert any(water['type'] == 'sea' for water in landscape['water']), landscape
                 landscapes.append({'case': label, **landscape})
-                passed(label + ': enlarged ground, mountains, valleys, river, fields and villages render on dry land')
+                passed(label + ': tenfold regional terrain, named army formations, villages and fields render on dry land')
 
                 choice = page.evaluate(CHOOSE_WIDE_POSITION)
                 picker = toolbar.get_by_role('combobox', name='配置する部隊', exact=True)
@@ -209,7 +242,8 @@ def main():
                 expect(selected).to_have_attribute('data-z', str(choice['z']))
                 expect(page.get_by_role('spinbutton', name='配置X', exact=True)).to_have_value(str(choice['x']))
                 expect(page.get_by_role('spinbutton', name='配置Z', exact=True)).to_have_value(str(choice['z']))
-                passed(label + ': player places a selected unit beyond the old map; the unit list and right editor stay synchronized')
+                assert choice['x'] < -88 or choice['x'] > 88 or choice['z'] < -100 or choice['z'] > 84, choice
+                passed(label + ': player places a unit beyond the previous enlarged map; the unit list and right editor stay synchronized')
 
                 before = page.evaluate('({count:window.__wideBattle.ledger.length,unit:window.__wideBattle.units.find(u=>u.id===%s)})' % json.dumps(choice['unitId']))
                 zone = page.evaluate('window.TenkaTactics.deploymentZone(window.__wideBattle)')
@@ -240,6 +274,7 @@ def main():
  }));
 }""")
                 assert all(abs(point['x']) < 1 and abs(point['y']) < 1 and -1 < point['z'] < 1 for point in projected_corners), projected_corners
+                render_stats.append({'case': label, 'camera': camera_after, 'projectedCorners': projected_corners, **page.evaluate('({calls:window.__wideWebglRenderer.info.render.calls,triangles:window.__wideWebglRenderer.info.render.triangles,geometries:window.__wideWebglRenderer.info.memory.geometries,textures:window.__wideWebglRenderer.info.memory.textures})')})
                 page.locator('.tactical-canvas').screenshot(path=str(shots / f'{width}-{case["mode"]}-{case["targetId"]}-wide.png'))
                 if width > 600 and case['mode'] == 'field':
                     other = page.evaluate('window.__wideBattle.units.find(u=>u.side===(window.__wideBattle.playerSide||"attacker")&&u.troops>0&&u.id!==%s).id' % json.dumps(choice['unitId']))
@@ -264,7 +299,7 @@ def main():
                     dragged = page.evaluate('window.__wideBattle.units.find(u=>u.id===%s)' % json.dumps(choice['unitId']))
                     assert math.dist([dragged['x'], dragged['z']], [target['x'], target['z']]) < 2, (dragged, target)
                     choice['x'], choice['z'] = dragged['x'], dragged['z']
-                    assert abs(choice['x']) > 44 or choice['z'] > 42 or choice['z'] < -50, choice
+                    assert abs(choice['x']) > 88 or choice['z'] > 84 or choice['z'] < -100, choice
                     display = page.evaluate('({x:String(Number(%s.x.toFixed(1))),z:String(Number(%s.z.toFixed(1)))})' % (json.dumps(dragged), json.dumps(dragged)))
                     expect(page.get_by_role('spinbutton', name='配置X', exact=True)).to_have_value(display['x'])
                     expect(page.get_by_role('spinbutton', name='配置Z', exact=True)).to_have_value(display['z'])
@@ -296,9 +331,14 @@ def main():
                 expect(page.locator('.tactical-graphics-error')).to_have_count(0)
                 passed(label + ': full battlefield camera works; battle starts with the chosen position and its command record')
                 context.close()
+                (shots / 'results.json').write_text(json.dumps({'checks': checks, 'browser_errors': errors, 'landscapes': landscapes, 'render_stats': render_stats, 'screenshots': str(shots)}, ensure_ascii=False, indent=2))
         browser.close()
     assert not errors, errors
-    summary = {'checks': checks, 'browser_errors': errors, 'landscapes': landscapes, 'screenshots': str(shots)}
+    profiles = {landscape['profile']['id'] for landscape in landscapes}
+    if not args.skip_coastal and not args.skip_ryukyu and 1440 in list(map(int, args.widths.split(','))) and 'defense' in args.modes.split(','):
+        assert {'mountain', 'plain', 'northern-coast', 'ryukyu'} <= profiles, profiles
+        passed('Regional battles use distinct mountain, plain, northern coast and Ryukyu profiles')
+    summary = {'checks': checks, 'browser_errors': errors, 'landscapes': landscapes, 'render_stats': render_stats, 'screenshots': str(shots)}
     (shots / 'results.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     print(json.dumps({'checks': checks, 'browser_errors': errors, 'screenshots': str(shots)}, ensure_ascii=False, indent=2), flush=True)
 

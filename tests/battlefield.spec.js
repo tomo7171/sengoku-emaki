@@ -10,13 +10,13 @@ const { runtime, clone } = require('./helpers/game-runtime.cjs');
 const env = runtime();
 if (!env.context.TenkaBattlefield) vm.runInContext(fs.readFileSync(path.join(__dirname, '../tenka-battlefield.js'), 'utf8'), env.context);
 const { Game, Tactics } = env, Battlefield = env.context.TenkaBattlefield;
-function create(mode = 'field') {
+function create(mode = 'field', version = 1) {
   const state = Game.newGame();
   if (mode === 'defense') {
     state.pendingDefense = { sourceId: 'inabayama', targetId: 'kiyosu', mode: 'siege' };
-    return { state, battle: Tactics.createDefense(state) };
+    return { state, battle: Tactics.createDefense(state, state.pendingDefense, { battlefieldVersion: version }) };
   }
-  return { state, battle: Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode }) };
+  return { state, battle: Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode, battlefieldVersion: version }) };
 }
 function finish(battle) {
   battle = Game.startBattle(battle);
@@ -126,7 +126,7 @@ test('coastal countryside shares one expanded sea polygon with land and naval de
   if (target.clan === source.clan) target.clan = source.clan === 'oda' ? 'saito' : 'oda';
   source.coastal = true; source.troops = 6000;
   state.armies[source.id].units = { ashigaru: 4000, archer: 0, cavalry: 0, firearm: 0, navy: 2000 };
-  const battle = Game.createBattle({ state, sourceId: source.id, targetId: target.id, mode: 'siege' });
+  const battle = Game.createBattle({ state, sourceId: source.id, targetId: target.id, mode: 'siege', battlefieldVersion: 1 });
   assert.equal(battle.layout.landscape.coastal, true);
   const sea = battle.layout.water.find(item => item.type === 'sea');
   assert.ok(Battlefield.inside(-82, 76, sea.polygon));
@@ -142,7 +142,7 @@ test('coastal countryside shares one expanded sea polygon with land and naval de
 test('a far-bank player deployment resolves an actual battle, verifies its ledger and settles supplies once', () => {
   const { state } = create();
   garrison(state, 'kiyosu', 12000); garrison(state, 'inabayama', 300);
-  let battle = Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field' });
+  let battle = Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field', battlefieldVersion: 1 });
   const own = battle.units.filter(item => item.side === 'attacker');
   for (let i = 0; i < own.length; i++) {
     const answer = Tactics.deploy(battle, { unitId: own[i].id, x: 78 + i % 2 * 5, z: 13 + Math.floor(i / 2) * 2 });
@@ -181,4 +181,146 @@ test('wet paddies slow actual marching troops and village cover reduces ranged f
   const normalBattle = clone(battle); normalBattle.layout.landscape.settlements = [];
   const protectedDamage = core.damage(battle, attacker, defender, false), normalDamage = core.damage(normalBattle, attacker, defender, false);
   assert.ok(Math.abs(protectedDamage / normalDamage - .9) < 1e-8, 'town streets provide ten percent ranged cover');
+});
+
+function regionalBattle(id, version = 2) {
+  const state = Game.newGame(), target = state.castles.find(item => item.id === id), source = state.castles.find(item => item.id === target.neighbors[0]);
+  state.playerClan = source.clan; state.alliances = [];
+  if (source.clan === target.clan) target.clan = source.clan === 'oda' ? 'saito' : 'oda';
+  source.troops = 6000; source.coastal = true;
+  state.armies[source.id].units = { ashigaru: 4000, navy: 2000, archer: 0, cavalry: 0, firearm: 0 };
+  return { state, battle: Game.createBattle({ state, sourceId: source.id, targetId: id, mode: 'siege', battlefieldVersion: version }) };
+}
+
+test('every regional battlefield has ten times the previous playable area while castle masonry and capture grounds stay unchanged', () => {
+  for (const castle of Game.castles) {
+    const { battle } = regionalBattle(castle.id), old = regionalBattle(castle.id, 1).battle;
+    assert.equal(battle.battlefieldVersion, 2);
+    const box = battle.layout.bounds, oldBox = old.layout.bounds;
+    const area = (box.maxX - box.minX) * (box.maxZ - box.minZ), oldArea = (oldBox.maxX - oldBox.minX) * (oldBox.maxZ - oldBox.minZ);
+    assert.ok(Math.abs(area / oldArea - 10) < 1e-10, `${castle.id}: expand the current battlefield tenfold`);
+    assert.deepEqual(clone(battle.structures.filter(item => !item.landscape)), clone(old.structures.filter(item => !item.landscape)));
+    assert.deepEqual(clone(battle.captureZone), clone(old.captureZone));
+    assert.deepEqual(clone(battle.layout.baileys), clone(old.layout.baileys));
+    assert.equal(Battlefield.elevationDelta(battle.layout, -44, -50), 0);
+    assert.equal(Battlefield.elevationDelta(battle.layout, 44, 42), 0);
+    assert.equal(battle.layout.landscape.profile.province, castle.province);
+    assert.equal(battle.layout.landscape.profile.region, castle.region);
+  }
+});
+
+test('plains, mountain valleys, basins, northern coasts and Ryukyu have different terrain rather than one enlarged template', () => {
+  const ids = ['kiyosu', 'inabayama', 'tsutsujigasaki', 'odawara', 'wakimoto', 'shuri'];
+  const worlds = ids.map(id => regionalBattle(id).battle.layout.landscape);
+  assert.equal(new Set(worlds.map(world => world.profile.id)).size, ids.length);
+  assert.equal(new Set(worlds.map(world => (world.bounds.maxX - world.bounds.minX) / (world.bounds.maxZ - world.bounds.minZ))).size, ids.length, 'the battlefield footprints have different aspect ratios');
+  assert.equal(new Set(worlds.map(world => JSON.stringify(world.rivers))).size, ids.length, 'river courses differ by region');
+  assert.equal(new Set(worlds.map(world => JSON.stringify(world.peaks))).size, ids.length, 'ridges and valleys differ by region');
+  assert.ok(worlds[0].fields.length > worlds[1].fields.length, 'plain country has more cultivated ground than a mountain region');
+  const paddies = world => world.fields.filter(field => field.kind === 'paddy').length / world.fields.length;
+  assert.ok(paddies(worlds[0]) > paddies(worlds[5]), 'Ryukyu is not filled with the same rice paddies as the alluvial plain');
+  assert.notEqual(worlds[3].seas[0].polygon.length, 4, 'headlands and coves replace the old uniform coastline rectangle');
+  for (const id of ids) {
+    const first = regionalBattle(id).battle, repeated = regionalBattle(id).battle;
+    assert.deepEqual(clone(first.layout.landscape), clone(repeated.layout.landscape), 'terrain generation is deterministic for saved-game replay');
+    const before = JSON.stringify(first); Battlefield.apply(first, 2);
+    assert.equal(JSON.stringify(first), before, 'reopening preparation cannot duplicate countryside geometry');
+  }
+});
+
+for (const mode of ['field', 'siege', 'defense']) {
+  test(`regional ${mode}: players can place troops far outside the previous field without crossing the enemy deployment zone`, () => {
+    const { battle } = create(mode, 2), unit = battle.units.find(item => item.side === battle.playerSide && item.type === 'ashigaru');
+    const zone = Tactics.deploymentZone(battle), z = mode === 'defense' ? -180 : 180;
+    let x = -180;
+    while (Battlefield.blocked(battle.layout, x, z) && x < -100) x += 4;
+    assert.ok(x < -100, 'a far-country deployment exists');
+    const answer = Tactics.deploy(battle, { unitId: unit.id, x, z });
+    assert.equal(answer.ok, true, answer.message);
+    assert.equal(answer.battle.units.find(item => item.id === unit.id).x, x);
+    assert.equal(Tactics.deploy(battle, { unitId: unit.id, x: zone.xMax + 2, z }).ok, false);
+    assert.equal(Tactics.deploy(battle, { unitId: unit.id, x, z: mode === 'defense' ? 180 : -180 }).ok, false);
+    const started = Game.startBattle(answer.battle);
+    assert.equal(Tactics.order(started, { unitId: unit.id, order: 'move', x, z }).ok, true);
+  });
+}
+
+test('land troops really march over the new outer river crossings from both banks without walking through water', () => {
+  for (const id of ['inabayama', 'kiyosu', 'wakimoto']) for (const direction of [-1, 1]) {
+    const { battle } = regionalBattle(id), crossing = battle.layout.landscape.crossings.at(-1), core = Tactics.install({});
+    const unit = battle.units.find(item => item.type === 'ashigaru');
+    Object.assign(unit, { x: crossing.x - 28 * direction, z: crossing.z + 18, order: 'move', status: 'active' });
+    const target = { x: crossing.x + 28 * direction, z: crossing.z + 18 };
+    assert.equal(Battlefield.blocked(battle.layout, unit.x, unit.z), false);
+    assert.equal(Battlefield.blocked(battle.layout, target.x, target.z), false);
+    let steps = 0, crossedWater = false;
+    while (Math.hypot(unit.x - target.x, unit.z - target.z) > .9 && steps++ < 800) {
+      core.move(battle, unit, target.x, target.z);
+      const world = battle.layout.landscape;
+      if (world.rivers.some(river => Battlefield.inside(unit.x, unit.z, river.polygon))) {
+        crossedWater = true;
+        assert.ok(world.crossings.some(item => Battlefield.inFootprint(item, unit.x, unit.z)), `${id}: every wet step lies on a bridge or ford`);
+      }
+      assert.equal(!!Battlefield.buildingAt(battle.layout, unit.x, unit.z), false);
+    }
+    assert.ok(steps < 800, `${id}: outer bank target is reachable, stopped at ${unit.x},${unit.z}`);
+    assert.ok(crossedWater, 'the test crosses a new outer reach of the river');
+  }
+});
+
+test('wide routes remain finite and navigable over the complete tenfold field', () => {
+  const { battle } = create('field', 2), layout = battle.layout;
+  const from = [-180, 180], target = [180, -180], route = Battlefield.route(layout, ...from, ...target);
+  assert.ok(route.length > 100, 'the test plans a journey across the expanded country');
+  assert.deepEqual(clone(route.at(-1)), target);
+  let previous = from;
+  for (const point of route) {
+    assert.ok(point.every(Number.isFinite));
+    const length = Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+    for (let part = 1; part <= Math.max(1, Math.ceil(length / .5)); part++) {
+      const t = part / Math.max(1, Math.ceil(length / .5));
+      assert.equal(Battlefield.blocked(layout, previous[0] + (point[0] - previous[0]) * t, previous[1] + (point[1] - previous[1]) * t, 0), false);
+    }
+    previous = point;
+  }
+  assert.deepEqual(clone(Battlefield.route(layout, ...from, ...target)), clone(route), 'cached navigation stays deterministic');
+});
+
+test('a coastal native castle with an inland core gains a usable outer sea without flooding its castle plan', () => {
+  const { battle } = regionalBattle('sunpu'), previous = regionalBattle('sunpu', 1).battle;
+  assert.equal(previous.layout.water.some(water => water.type === 'sea'), false, 'exercise the native inland-core coastal case');
+  assert.equal(battle.layout.landscape.profile.id, 'coast');
+  assert.ok(battle.layout.water.some(water => water.type === 'sea'));
+  const location = { x: battle.layout.bounds.minX + 20, z: 180 };
+  const navy = battle.units.find(unit => unit.side === 'attacker' && unit.type === 'navy'), foot = battle.units.find(unit => unit.side === 'attacker' && unit.type === 'ashigaru');
+  assert.ok(navy && foot);
+  assert.equal(Tactics.deploy(battle, { unitId: navy.id, ...location }).ok, true, 'naval units have real sea space');
+  assert.equal(Tactics.deploy(battle, { unitId: foot.id, ...location }).ok, false);
+  for (let z = -50; z <= 42; z += 4) for (let x = -44; x <= 44; x += 4) assert.equal(battle.layout.landscape.seas.some(sea => Battlefield.inside(x, z, sea.polygon)), false, 'the added coast never floods original gates or terraces');
+});
+
+test('country routes exclude additional solid fortification waypoints and invalidate their cache when fences change', () => {
+  const { battle } = create('field', 2), unit = battle.units.find(item => item.type === 'ashigaru');
+  Object.assign(unit, { x: -180, z: 180 });
+  Battlefield.navigationTarget(battle, unit, 180, -180);
+  const original = unit.landscapeRoute.points;
+  const center = original[Math.floor(original.length / 3)], obstacle = (x, z, padding = 0) => Math.abs(x - center[0]) < 3 + padding && Math.abs(z - center[1]) < 1 + padding;
+  assert.ok(original.some(([x, z]) => obstacle(x, z, .7)), 'the newly built fence obstructs an existing waypoint');
+  Battlefield.navigationTarget(battle, unit, 180, -180, { key: 'intact-fence-1', blocked: obstacle });
+  assert.equal(unit.landscapeRoute.obstacleKey, 'intact-fence-1');
+  assert.ok(unit.landscapeRoute.points.length > 0);
+  assert.ok(unit.landscapeRoute.points.every(([x, z]) => !obstacle(x, z, .7)), 'the planner never hands a waypoint inside the physical fence to local collision handling');
+  Battlefield.navigationTarget(battle, unit, 180, -180, { key: 'destroyed-fence-1', blocked: () => false });
+  assert.equal(unit.landscapeRoute.obstacleKey, 'destroyed-fence-1');
+});
+
+test('a saved version-one battle keeps its original countryside, movement ledger and settlement behavior', () => {
+  const { state } = create();
+  garrison(state, 'kiyosu', 9000); garrison(state, 'inabayama', 300);
+  const battle = finish(Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field', battlefieldVersion: 1 }));
+  assert.equal(battle.battlefieldVersion, 1);
+  assert.equal(battle.layout.landscape.version, 1);
+  assert.equal(battle.layout.landscape.profile, undefined);
+  assert.ok(Tactics.verify(state, battle), 'v1 replays use the unchanged v1 terrain and route planner');
+  assert.equal(Game.settle(state, battle).ok, true);
 });

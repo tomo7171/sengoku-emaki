@@ -9,9 +9,12 @@ const { Game, Three, context } = runtime({ three: true });
 const Models = context.TenkaCastleModels;
 const Environment = context.TenkaBattleEnvironment;
 const initial = Game.newGame();
+const regionalExamples = ['kiyosu','inabayama','tsutsujigasaki','odawara','wakimoto','shuri','sannohe'];
 const materials = Object.fromEntries(['wood', 'darkWood', 'stone', 'earth', 'plaster', 'roof', 'iron']
   .map(name => [name, new Three.MeshStandardMaterial({ color: '#9b8a73' })]));
 
+// Keep published v1 geometry fixtures explicit while the live default moves to
+// v2; regional tests opt in below so both generations remain covered.
 function battleFor(id, battlefieldVersion = 1) {
   const state = clone(initial), target = state.castles.find(castle => castle.id === id);
   const source = state.castles.find(castle => castle.id === target.neighbors[0]);
@@ -66,6 +69,14 @@ function assertDryFootprint(corners,waters,label) {
       const c=water.polygon[edge],d=water.polygon[(edge+1)%water.polygon.length];
       assert.ok(flatSegmentDistance(a,b,c,d)>1e-5,`${label}: a water bank cannot cut through the footprint`);
     }
+  }
+}
+function assertRoadClearance(corners,paths,label) {
+  const edges=corners.map((point,index)=>[point,corners[(index+1)%corners.length]]);
+  for(const path of paths) for(let part=1;part<path.points.length;part++) {
+    const a=path.points[part-1],b=path.points[part];
+    const separation=Math.min(...edges.map(([c,d])=>flatSegmentDistance(a,b,c,d)));
+    assert.ok(separation>=path.width/2-.01&&!flatInside(a,corners)&&!flatInside(b,corners),`${label}: solid house walls must leave the ${path.id} road corridor open (${separation})`);
   }
 }
 
@@ -178,8 +189,8 @@ test('roofs have curved lit surfaces and rotated earthwork segments follow the a
   for (const group of [model.group, sloped.group]) group.traverse(object => object.geometry?.dispose());
 });
 
-test('legacy and wide landscapes keep finite textured batches within their separate budgets and release owned graphics once', () => {
-  for (const battlefieldVersion of [0, 1]) for (const id of ['nanao', 'inabayama', 'odawara', 'kiyosu', 'wakimoto']) {
+test('legacy, wide and regional landscapes keep finite textured batches within their separate budgets and release owned graphics once', () => {
+  for (const battlefieldVersion of [0, 1, 2]) for (const id of battlefieldVersion===2?regionalExamples:['nanao', 'inabayama', 'odawara', 'kiyosu', 'wakimoto']) {
     const battle = battleFor(id, battlefieldVersion), before = JSON.stringify(battle), scene = new Three.Group(), sentinel = new Three.Group();
     scene.add(sentinel);
     const landscape = Environment.create(Three, { battle, scene, heightAt: (x, z) => .18 + Math.sin(x * .1) + Math.cos(z * .1) });
@@ -199,12 +210,16 @@ test('legacy and wide landscapes keep finite textured batches within their separ
     });
     assert.equal(draws, landscape.stats.drawCalls);
     const wide = !!battle.layout.landscape?.version;
-    assert.equal(wide, battlefieldVersion === 1);
+    assert.equal(wide, battlefieldVersion > 0);
     assert.ok(draws <= (wide ? 24 : 8) && instances.length >= 4, `${id}: countryside detail is batched instead of one draw per tree or house (${draws})`);
     assert.ok(triangles < (wide ? 150000 : 90000), `${id}: ${wide?'wide':'legacy'} landscape triangle budget (${triangles})`);
     if (wide) {
       assert.equal(landscape.stats.fields, battle.layout.landscape.fields.length);
       assert.equal(landscape.stats.houses, battle.layout.landscape.settlements.reduce((sum, settlement) => sum + settlement.houses.length, 0));
+    }
+    if(battlefieldVersion===2) {
+      assert.equal(landscape.stats.regionalProfile,battle.layout.landscape.profile.id,'the rendered environment uses the real castle regional profile');
+      assert.equal(landscape.group.userData.regionalLandscape.id,battle.layout.landscape.profile.id);
     }
     for (const item of [...geometries, ...surfaces, ...instances]) {
       disposals.set(item, 0); item.addEventListener('dispose', () => disposals.set(item, disposals.get(item) + 1));
@@ -217,9 +232,9 @@ test('legacy and wide landscapes keep finite textured batches within their separ
 });
 
 test('rendered village walls match their authoritative houses and leave roads, rivers and initial troops clear', () => {
-  const distance=flatPointDistance,segmentsDistance=flatSegmentDistance,inside=flatInside;
-  for (const id of ['nanao','odawara','wakimoto']) {
-    const battle=battleFor(id),before=JSON.stringify(battle),scene=new Three.Group();
+  const distance=flatPointDistance,inside=flatInside;
+  for (const battlefieldVersion of [1,2]) for (const id of battlefieldVersion===2?regionalExamples:['nanao','odawara','wakimoto']) {
+    const battle=battleFor(id,battlefieldVersion),before=JSON.stringify(battle),scene=new Three.Group();
     const ground=(x,z)=>.18+context.TenkaBattlefield.elevationDelta(battle.layout,x,z);
     const landscape=Environment.create(Three,{battle,scene,heightAt:ground});
     const houses=battle.layout.landscape.settlements.flatMap(settlement=>settlement.houses),seen=new Set();
@@ -257,11 +272,7 @@ test('rendered village walls match their authoritative houses and leave roads, r
         assert.ok(footing&&footing.top>=wallBottom-.001&&footing.top<wallBottom+.04,'the stone foundation reaches the level house floor');
         assert.ok(terrainSamples.every(height=>footing.bottom<height&&footing.top>height),'the foundation spans every ground sample rather than floating over lower corners');
         const edges=corners.map((point,edge)=>[point,corners[(edge+1)%corners.length]]);
-        for(const path of battle.layout.paths) for(let part=1;part<path.points.length;part++) {
-          const a=path.points[part-1],b=path.points[part];
-          const separation=Math.min(...edges.map(([c,d])=>segmentsDistance(a,b,c,d)));
-          assert.ok(separation>=path.width/2-.01&&!inside(a,corners)&&!inside(b,corners),`${id}/${house.id}: solid house walls must leave the ${path.id} road corridor open (${separation})`);
-        }
+        assertRoadClearance(corners,battle.layout.paths,`${id}/${house.id}`);
         assertDryFootprint(corners,battle.layout.water,`${id}/${house.id}`);
         for(const unit of battle.units) {
           const point=[unit.x,unit.z];
@@ -290,4 +301,30 @@ test('all 95 countryside plans keep every house and field footprint clear of bot
     assert.equal(JSON.stringify(battle),before);
   }
   assert.ok(coastal>10&&footprints>3000,'cover sea-facing castles and thousands of physical house/field footprints');
+});
+
+test('all 95 regional battlefields keep finite physical houses and fields within their own bounds and off every water surface', () => {
+  const profiles=new Set();let footprints=0;
+  for(const castle of Game.castles) {
+    const battle=battleFor(castle.id,2),before=JSON.stringify(battle),world=battle.layout.landscape,box=battle.layout.bounds;
+    assert.equal(battle.battlefieldVersion,2);
+    assert.equal(world.version,2);
+    assert.ok(world.profile?.id,`${castle.id}: its actual terrain has a named regional profile`);
+    assert.equal(world.profile.region,castle.region);
+    assert.equal(world.profile.province,castle.province);
+    profiles.add(world.profile.id);
+    const houses=world.settlements.flatMap(settlement=>settlement.houses),houseIds=new Set(houses.map(house=>house.id));
+    for(const item of [...world.fields,...houses]) {
+      const w=(item.w??item.width)/2,d=(item.d??item.depth)/2,angle=item.rotation||0;
+      assert.ok([item.x,item.z,w,d,angle].every(Number.isFinite)&&w>0&&d>0,`${castle.id}/${item.id}: finite usable dimensions`);
+      const corners=[[-w,-d],[w,-d],[w,d],[-w,d]].map(([x,z])=>[item.x+Math.cos(angle)*x-Math.sin(angle)*z,item.z+Math.sin(angle)*x+Math.cos(angle)*z]);
+      assert.ok(corners.every(([x,z])=>x>=box.minX&&x<=box.maxX&&z>=box.minZ&&z<=box.maxZ),`${castle.id}/${item.id}: physical footprint lies inside the regional battlefield`);
+      assertDryFootprint(corners,battle.layout.water,`regional ${castle.id}/${item.id}`);
+      if(houseIds.has(item.id))assertRoadClearance(corners,battle.layout.paths,`regional ${castle.id}/${item.id}`);
+      footprints++;
+    }
+    assert.equal(JSON.stringify(battle),before,'geometry checks never rewrite the regional battle');
+  }
+  assert.deepEqual([...profiles].sort(),['basin','coast','hill','mountain','northern-coast','plain','ryukyu']);
+  assert.ok(footprints>5000,'validate thousands of added physical country houses and fields across every profile');
 });

@@ -10,11 +10,15 @@ vm.runInNewContext(fs.readFileSync(require.resolve('../tenka-battle-environment.
 const Environment = context.TenkaBattleEnvironment;
 vm.runInNewContext(fs.readFileSync(require.resolve('../tenka-battlefield.js'), 'utf8'), context);
 const Battlefield = context.TenkaBattlefield;
-function makeBattle(id, legacy = false) {
+function makeBattle(id, legacy = false, version = 1) {
   const state = Game.newGame(), target = state.castles.find(castle => castle.id === id);
-  const source = state.castles.find(castle => target.neighbors.includes(castle.id) && castle.clan !== target.clan);
+  const source = state.castles.find(castle => target.neighbors.includes(castle.id) && castle.clan !== target.clan) || state.castles.find(castle => castle.id === target.neighbors[0]);
+  if (source.clan === target.clan) target.clan = source.clan === 'oda' ? 'saito' : 'oda';
+  source.coastal = true; source.troops = 6000;
+  state.armies[source.id].units = { ashigaru: 4000, navy: 2000, archer: 0, cavalry: 0, firearm: 0 };
+  state.alliances = [];
   state.playerClan = source.clan;
-  const battle = Game.createBattle({ state, sourceId: source.id, targetId: id, mode: 'siege' });
+  const battle = Game.createBattle({ state, sourceId: source.id, targetId: id, mode: 'siege', battlefieldVersion: legacy ? 0 : version });
   if (legacy && battle.layout.landscape) {
     const world = battle.layout.landscape, roadIds = new Set(world.roads.map(road => road.id));
     battle.layout.bounds = { ...world.coreBounds };
@@ -165,4 +169,73 @@ test('expanded fields, crops and settlements are finite terrain-following batche
   assert.equal(sharedDisposals, 0, 'materials supplied by the castle renderer remain owned by that renderer');
   assert.equal(scene.children.length, 0);
   assert.equal(JSON.stringify(battle), before);
+});
+
+test('regional woodland stays spread across near and far terrain without multiplying scene cost by map area', () => {
+  const battle = makeBattle('inabayama'), world = battle.layout.landscape;
+  world.version = 2;
+  world.profile = { id: 'mountain', label: '山間の城', treeKind: 'cedar', forestDensity: .9 };
+  battle.layout.bounds = { minX: -270, maxX: 270, minZ: -310, maxZ: 290 };
+  for (const [index, [x, z]] of [[-170, -210], [190, -170], [-180, 180], [170, 200]].entries()) {
+    world.forests.push({ id: `outer-wood-${index}`, kind: index % 2 ? 'cedar' : 'mixed', x, z, w: 85, d: 100 });
+  }
+  const before = JSON.stringify(battle), heightAt = (x, z) => 3 + Math.sin(x / 40) * 4 + Math.cos(z / 70) * 3;
+  const plan = Environment.plan({ battle, heightAt }), repeat = Environment.plan({ battle, heightAt });
+  assert.equal(JSON.stringify(plan), JSON.stringify(repeat));
+  assert.equal(JSON.stringify(battle), before);
+  assert.ok(plan.trees.length >= 220 && plan.trees.length <= 280, 'a larger map uses a fixed mobile-friendly tree budget');
+  assert.ok(plan.trees.some(tree => Math.hypot(tree.x, tree.z) < 90), 'castle-side woodland remains visible');
+  for (const [x, z] of [[-170, -210], [190, -170], [-180, 180], [170, 200]]) {
+    assert.ok(plan.trees.some(tree => Math.abs(tree.x - x) < 43 && Math.abs(tree.z - z) < 51), 'each outer woodland receives its own cluster');
+  }
+  assert.ok(plan.trees.filter(tree => tree.distant).length > plan.trees.length / 2, 'most wide-area trees use reduced branch and crown detail');
+  for (const item of [...plan.trees, ...plan.rocks, ...plan.grasses]) {
+    assert.equal(item.y, heightAt(item.x, item.z), 'decorations follow regional slopes instead of a common flat surface');
+    assert.equal(battle.layout.water.some(water => inside(item.x, item.z, water.polygon)), false);
+  }
+  assert.equal(plan.ridges.length, 0);
+});
+
+test('coastal pines and Ryukyu broadleaves have different actual silhouettes and visible regional stone colours', () => {
+  const source = makeBattle('inabayama'), before = JSON.stringify(source);
+  const results = [];
+  for (const profile of [{ id: 'coast', label: '沿岸', treeKind: 'pine', forestDensity: .6 }, { id: 'ryukyu', label: '琉球', treeKind: 'broadleaf', forestDensity: .6 }]) {
+    const battle = clone(source); battle.layout.landscape.version = 2; battle.layout.landscape.profile = profile;
+    const plan = Environment.plan({ battle });
+    assert.ok(plan.trees.some(tree => tree.kind === profile.treeKind), `${profile.id} keeps its local tree type`);
+    const scene = new Three.Group(), environment = Environment.create(Three, { battle, scene });
+    assert.equal(environment.group.userData.regionalLandscape.id, profile.id);
+    assert.equal(environment.stats.regionalProfile, profile.id);
+    const crowns = environment.meshes.find(mesh => mesh.name === 'five-lobed-broadleaf-crowns');
+    const rocks = environment.meshes.find(mesh => mesh.name === 'weathered-rocks-at-woodland-edge');
+    const matrix = crowns.instanceMatrix.array;
+    const sx = Math.hypot(...matrix.slice(0, 3)), sy = Math.hypot(...matrix.slice(4, 7));
+    results.push({ colour: [...rocks.instanceColor.array.slice(0, 3)], crownRatio: sy / sx });
+    assert.ok(environment.stats.drawCalls <= 24);
+    environment.dispose(); assert.equal(scene.children.length, 0);
+  }
+  assert.notDeepEqual(results[0].colour, results[1].colour, 'shared mesh batches carry different visible coastal and limestone-style tints');
+  assert.ok(results[0].crownRatio < results[1].crownRatio * .7, 'spreading pine crowns are flatter than broadleaf crowns');
+  assert.equal(JSON.stringify(source), before);
+});
+
+test('live regional battle plans render their own terrain, cultivated area and settlements without changing collision geometry', () => {
+  const profiles = new Set(), fieldCounts = new Set();
+  for (const id of ['kiyosu', 'inabayama', 'odawara', 'wakimoto', 'shuri']) {
+    const battle = makeBattle(id, false, 2), before = JSON.stringify(battle), world = battle.layout.landscape;
+    const heightAt = (x, z) => .18 + Battlefield.elevationDelta(battle.layout, x, z);
+    const plan = Environment.plan({ battle, heightAt });
+    profiles.add(plan.profile.id); fieldCounts.add(plan.fields.length);
+    assert.equal(plan.fields.length, world.fields.length);
+    assert.equal(plan.settlements.reduce((count, settlement) => count + settlement.houses.length, 0), world.settlements.reduce((count, settlement) => count + settlement.houses.length, 0));
+    assert.ok(plan.fields.length > 15 && plan.settlements.length > 3, 'the added playable land contains inhabited and cultivated districts');
+    assert.ok(plan.trees.some(tree => tree.x < -88 || tree.x > 88 || tree.z < -100 || tree.z > 84), 'woodland reaches the newly expanded battlefield');
+    for (const tree of plan.trees) {
+      assert.equal(tree.y, heightAt(tree.x, tree.z));
+      assert.equal(Battlefield.blocked(battle.layout, tree.x, tree.z, tree.size * 1.8), false, 'real water and house footprints stay free of vegetation');
+    }
+    assert.equal(JSON.stringify(battle), before);
+  }
+  assert.ok(profiles.size >= 4, 'real castles have distinct plains, mountains, coasts and Ryukyu scenery');
+  assert.ok(fieldCounts.size >= 3, 'regional farming patterns are not the same fixed set of parcels');
 });

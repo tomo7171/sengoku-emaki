@@ -369,3 +369,27 @@ test('documented natural longevity allows Ieyasu late children while battle deat
  assert.equal(diverged.officers.some(o=>o.id==='tokugawa_yorifusa'),false,'historical births do not force a killed parent to survive');
  assert.equal(diverged.officers.find(o=>o.id===father.id).deathCause,'battle');
 });
+
+test('seasonal recruitment lists eight stable local candidates and every eligible ronin together', () => {
+  const source = game();
+  source.officers.push(officer('ronin_list_a', '浪人甲', 'matsudaira', { status: 'ronin', castleId: null }), officer('ronin_list_b', '浪人乙', 'matsudaira', { status: 'ronin', castleId: null }), officer('young_ronin', '幼年浪人', 'matsudaira', { status: 'ronin', birth: 1550, castleId: null }));
+  const snapshot = JSON.stringify(source), first = Dynasty.getView(source).recruits;
+  assert.equal(first.filter(o => o.id.startsWith('dyn-recruit-')).length, 8);
+  assert.equal(first.length, 10);
+  assert.equal(first.some(o => o.id === 'young_ronin'), false);
+  assert.equal(new Set(first.map(o => o.id)).size, first.length);
+  assert.equal(new Set(first.map(o => o.name)).size, first.length);
+  assert.deepEqual(Dynasty.getView(JSON.parse(JSON.stringify(source))).recruits, first);
+  assert.equal(JSON.stringify(source), snapshot, 'viewing the full list does not mutate the save');
+  const selected = first[6], result = Dynasty.act(source, { type: 'recruit', candidateId: selected.id });
+  assert.equal(result.ok, true, result.message);
+  const hired = result.state.officers.find(o => o.id === selected.id);
+  for (const key of ['name', 'birth', 'leadership', 'valor', 'intelligence', 'politics']) assert.equal(hired[key], selected[key], key);
+  const remaining = Dynasty.getView(result.state).recruits;
+  assert.deepEqual(remaining, first.filter(o => o.id !== selected.id), 'hiring one person leaves the rest of the list unchanged');
+  assert.deepEqual(Dynasty.getView(JSON.parse(JSON.stringify(result.state))).recruits, remaining, 'saving retains the identities and order');
+  assert.equal(Dynasty.act(result.state, { type: 'recruit', candidateId: selected.id }).ok, false, 'a removed candidate cannot be hired twice');
+  const next = Dynasty.getView({ ...result.state, turn: 2, season: 1 }).recruits.filter(o => o.id.startsWith('dyn-recruit-'));
+  assert.equal(next.length, 8);
+  assert.equal(next.some(o => first.some(old => old.id === o.id)), false, 'the next season has a fresh pool');
+});

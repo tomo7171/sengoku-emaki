@@ -17,13 +17,14 @@
   });
   const FORTIFICATIONS = Object.freeze({
     camp: { name: "陣地", limit: 2, w: 5, d: 4, h: 2.8, hp: 500, description: "半径九以内の味方の被害を軽減し、士気をゆっくり回復" },
-    palisade: { name: "木柵", limit: 8, w: 7, d: 1, h: 2.2, hp: 800, description: "敵の進路を阻み、背後の味方を守る。敵の攻撃で破壊される" },
+    palisade: { name: "木柵", limit: 8, w: 7, d: 1, h: 2.2, hp: 800, description: "両軍の通行を遮る。味方は迂回し、敵は攻撃して破壊できる" },
   });
   const copy = (value) => JSON.parse(JSON.stringify(value));
   const sum = (values) => TYPES.reduce((total, type) => total + (values?.[type] || 0), 0);
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const active = (unit) => unit.troops > 0 && !["routed", "destroyed"].includes(unit.status);
   const friendly = (battle) => battle.playerSide || "attacker";
+  const regionalRules = (battle) => battle.battlefieldVersion >= 2;
   let original = null;
   let installed = null;
 
@@ -159,7 +160,90 @@
     for (const water of battle.layout.water) {
       if (insidePolygon(x, z, water.polygon) && !battle.structures.some((structure) => (structure.kind || structure.type) === "bridge" && contains(structure, x, z, 0.8))) return true;
     }
+    if (regionalRules(battle) && (battle.fortifications || []).some((item) => item.kind === "palisade" && item.hp > 0 && fortificationContains(item, x, z, .65))) return true;
     return battle.structures.some((structure) => structure.hp > 0 && !structure.passable && ["wall", "palisade", "gate", "hall"].includes(structure.kind || structure.type) && contains(structure, x, z, (structure.kind || structure.type) === "hall" ? 0.15 : 0.5));
+  }
+  function seed(value) {
+    let hash = 2166136261;
+    for (const character of String(value)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+    return hash;
+  }
+  function doctrine(home, battle) {
+    const terrain = battle.layout.landscape?.profile?.id || battle.terrain;
+    if (["takeda", "uesugi", "nambu", "date"].includes(home.clan)) return { id: "mobile-wings", name: "騎馬の両翼・歩兵の中央", frontage: 1.15 };
+    if (["oda", "shimazu", "suzuki", "saika", "otomo"].includes(home.clan) || ["薩摩", "大隅", "紀伊", "近江", "摂津"].includes(home.province)) return { id: "missile-line", name: "射撃隊と槍隊の段陣", frontage: 1.08 };
+    if (home.coastal && ["mori", "chosokabe", "ryukyu"].includes(home.clan)) return { id: "coastal-wings", name: "陸上の備えと沿岸の水軍", frontage: 1.1 };
+    if (["mountain", "hill"].includes(terrain)) return { id: "terrain-defense", name: "山道を押さえる縦深陣", frontage: .8 };
+    return { id: "balanced-lines", name: "歩兵・射撃・騎馬の三段陣", frontage: 1 };
+  }
+  function adaptDeployments(battle) {
+    const landscape = battle.layout.landscape, occupied = [];
+    battle.armyDeployment = { version: 2 };
+    for (const side of ["attacker", "defender"]) {
+      const home = side === "attacker" ? battle.sourceCastle : battle.targetCastle;
+      const strategy = doctrine(home, battle), salt = seed(`${home.id}:${home.clan}:${battle.targetId}:${battle.mode}`);
+      const anchor = landscape?.deploymentPlan?.[side] || { x: 0, z: side === "attacker" ? 34 : -27, frontage: 38 };
+      const forward = side === "attacker" ? -1 : 1, zone = deploymentZone(battle, side);
+      const units = battle.units.filter((unit) => unit.side === side), ranks = {};
+      battle.armyDeployment[side] = { ...strategy, clan: home.clan, province: home.province, terrain: landscape?.profile?.id || battle.terrain, units: Object.fromEntries(TYPES.map((type) => [type, units.filter((unit) => unit.type === type).reduce((amount, unit) => amount + unit.troops, 0)])) };
+      for (const unit of units) {
+        const index = ranks[unit.type] || 0; ranks[unit.type] = index + 1;
+        const ranged = ["archer", "firearm"].includes(unit.type), cavalry = unit.type === "cavalry";
+        unit.formation = cavalry ? ["mountain", "hill"].includes(battle.terrain) ? "loose" : "wedge" : ranged ? "line" : side === "defender" ? "defensive" : strategy.id === "mobile-wings" ? "wedge" : "line";
+        if (unit.type === "navy") {
+          // The actual regional roster supplies ships. Search only navigable
+          // sea; never convert infantry into ships or manufacture soldiers.
+          const sea = battle.layout.water.find((water) => water.type === "sea");
+          if (sea) {
+            const seaMin = Math.min(...sea.polygon.map((point) => point[0])), seaMax = Math.max(...sea.polygon.map((point) => point[0]));
+            const z = clamp(anchor.z + (index - 1) * 6, zone.zMin + 2, zone.zMax - 2);
+            // A regional shoreline meanders: its global easternmost vertex is
+            // not necessarily water at this ship's north/south coordinate.
+            for (let x = clamp(seaMax - 7 - index % 3 * 5, seaMin + 3, seaMax - 1); x >= seaMin + 2; x -= 3) {
+              if (!blocked(battle, x, z, "navy")) { Object.assign(unit, { x, z, targetX: x, targetZ: z }); break; }
+            }
+          }
+          continue;
+        }
+        let desiredX, desiredZ;
+        const candidates = [];
+        if (battle.mode === "siege" && side === "defender") {
+          // Each real game's bailey supplies distinct viable defensive ground.
+          // Archers cover outer approaches, firearms and reserves cover the
+          // inner bailey; the player can replace this proposal before opening.
+          const baileys = [...battle.layout.baileys];
+          baileys.sort((a, b) => ranged && unit.type === "archer" ? b.z - a.z : a.z - b.z);
+          for (const bailey of baileys) {
+            const centerX = bailey.x, centerZ = bailey.z;
+            for (let row = 0; row < Math.ceil(bailey.depth / 2.7); row++) for (let column = 0; column < Math.ceil(bailey.width / 3); column++) {
+              const x = centerX + (column - Math.floor(bailey.width / 3) / 2) * 3, z = centerZ + (row - Math.floor(bailey.depth / 2.7) / 2) * 2.7;
+              if (Math.abs(x - centerX) < bailey.width / 2 - 1 && Math.abs(z - centerZ) < bailey.depth / 2 - 1) candidates.push({ x, z, score: Math.hypot(x - centerX, z - centerZ) + candidates.length / 1000 });
+            }
+          }
+          desiredX = unit.x; desiredZ = unit.z;
+        } else {
+          const spacing = 5.2 * strategy.frontage * (anchor.frontage || 42) / 42, column = index % 5 - 2, row = Math.floor(index / 5);
+          const jitter = ((salt >>> (index % 12)) % 5 - 2) * .7;
+          desiredX = anchor.x + (cavalry ? (index % 2 ? -1 : 1) * (18 + Math.floor(index / 2) * 4) : column * spacing) + jitter;
+          desiredZ = anchor.z - forward * ((ranged ? 9 : cavalry ? 5 : 0) + row * 5) + (strategy.id === "terrain-defense" ? Math.abs(column) * 1.4 : 0);
+        }
+        // Ranked search keeps the initial proposal on land, clear of masonry,
+        // villages and other units, including unusual island castle plans.
+        for (let radius = 0; radius <= 24; radius += 2) {
+          const offsets = radius ? [[-radius, 0], [radius, 0], [0, -radius], [0, radius], [-radius, -radius], [radius, radius], [-radius, radius], [radius, -radius]] : [[0, 0]];
+          for (const [dx, dz] of offsets) candidates.push({ x: desiredX + dx, z: desiredZ + dz, score: 1000 + radius });
+        }
+        candidates.sort((a, b) => a.score - b.score);
+        const position = candidates.find(({ x, z }) => x >= zone.xMin + 1 && x <= zone.xMax - 1 && z >= zone.zMin + 1 && z <= zone.zMax - 1 && !blocked(battle, x, z, unit.type) && !occupied.some((other) => Math.hypot(other.x - x, other.z - z) < 2.5));
+        if (position) Object.assign(unit, { x: position.x, z: position.z, targetX: position.x, targetZ: position.z });
+        occupied.push({ x: unit.x, z: unit.z });
+        if (side !== friendly(battle) && battle.mode === "field" && cavalry) unit.order = "attack";
+      }
+    }
+    // The default lines remain close enough for immediate combat; a player
+    // placing units on the outer battlefield still has time to march to battle.
+    const box = bounds(battle);
+    battle.timeLimit = Math.max(540, Math.ceil(Math.hypot(box.maxX - box.minX, box.maxZ - box.minZ) / 1.25 + 180));
   }
   function event(battle, text) {
     battle.events.push({ time: battle.time || 0, text });
@@ -192,7 +276,8 @@
       battle.availableUnits = Object.fromEntries(TYPES.map((type) => [type, battle.units.filter((unit) => unit.side === "defender" && unit.type === type).reduce((total, unit) => total + unit.maxTroops, 0)]));
       battle.friendlyOfficers = copy(battle.defenderOfficers);
     } else battle.friendlyOfficers = copy(battle.eligibleOfficers);
-    if (options.battlefieldVersion !== 0) root.TenkaBattlefield?.apply(battle);
+    if (options.battlefieldVersion !== 0) root.TenkaBattlefield?.apply(battle, options.battlefieldVersion ?? root.TenkaBattlefield.version);
+    if (regionalRules(battle)) adaptDeployments(battle);
     return battle;
   }
   function create(options) {
@@ -226,7 +311,7 @@
     if (!TYPES.includes(type) || !Number.isInteger(troops) || troops < 0 || troops > 600) return reject(battle, "一部隊は五兵科から選び、兵数は零から六百の整数にしてください。");
     const home = side === "defender" ? battle.targetCastle : battle.sourceCastle;
     if (type === "navy" && (!home.coastal || !battle.coastal)) return reject(battle, "水軍は沿岸拠点の海上へ配置してください。");
-    if (blocked(battle, x, z, type)) return reject(battle, "堀・川・海・城壁・町や村の家屋を避け、水軍は海上へ配置してください。");
+    if (blocked(battle, x, z, type)) return reject(battle, "堀・川・海・城壁・木柵・町や村の家屋を避け、水軍は海上へ配置してください。");
     if (troops > 0 && (battle.fortifications || []).some((item) => item.kind === "palisade" && fortificationContains(item, x, z, 0.8))) return reject(battle, "木柵の上には配置できません。柵の後ろへ部隊を配置してください。");
     const others = battle.units.filter((item) => item.side === side && item.id !== unit.id);
     if (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops) return reject(battle, "出陣できる兵科別の兵数を超えています。");
@@ -308,6 +393,62 @@
     }
     return original.damage(battle, attacker, target, structure) * factor;
   }
+  function fencePenetration(structure, x, z, padding = .45) {
+    const angle = (structure.rotation || 0) * Math.PI / 180, dx = x - structure.x, dz = z - structure.z;
+    return Math.min(structure.w / 2 + padding - Math.abs(dx * Math.cos(angle) + dz * Math.sin(angle)), structure.d / 2 + padding - Math.abs(-dx * Math.sin(angle) + dz * Math.cos(angle)));
+  }
+  function segmentOpen(battle, x, z, targetX, targetZ, fences) {
+    if (fences.some((item) => segmentHits(item, x, z, targetX, targetZ, .72))) return false;
+    const steps = Math.max(1, Math.ceil(Math.hypot(targetX - x, targetZ - z) / .45));
+    for (let step = 1; step <= steps; step++) {
+      const px = x + (targetX - x) * step / steps, pz = z + (targetZ - z) * step / steps;
+      if (blocked(battle, px, pz, "ashigaru") || root.TenkaBattlefield?.blocked(battle.layout, px, pz, .5)) return false;
+    }
+    return true;
+  }
+  function fenceNavigationTarget(battle, unit, targetX, targetZ) {
+    if (!regionalRules(battle) || unit.type === "navy") return { x: targetX, z: targetZ };
+    const fences = (battle.fortifications || []).filter((item) => item.kind === "palisade" && item.hp > 0);
+    if (!fences.length) { delete unit.fenceRoute; return { x: targetX, z: targetZ }; }
+    const overlapping = fences.find((item) => fortificationContains(item, unit.x, unit.z, .45));
+    if (overlapping) {
+      // Old or externally restored snapshots may start on a stake. Release
+      // them through the nearest face rather than teleporting across the fence.
+      const angle = (overlapping.rotation || 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle), dx = unit.x - overlapping.x, dz = unit.z - overlapping.z;
+      let lx = dx * c + dz * s, lz = -dx * s + dz * c;
+      if (overlapping.w / 2 - Math.abs(lx) < overlapping.d / 2 - Math.abs(lz)) lx = (lx < 0 ? -1 : 1) * (overlapping.w / 2 + .9);
+      else lz = (lz < 0 ? -1 : 1) * (overlapping.d / 2 + .9);
+      return { x: overlapping.x + lx * c - lz * s, z: overlapping.z + lx * s + lz * c };
+    }
+    // An advancing enemy may deliberately break hostile stakes. Its own
+    // fieldworks, and all obstacles during a withdrawal, require a detour.
+    const mustAvoid = fences.filter((item) => item.side === unit.side || unit.order === "retreat");
+    if (!mustAvoid.some((item) => segmentHits(item, unit.x, unit.z, targetX, targetZ, .72))) { delete unit.fenceRoute; return { x: targetX, z: targetZ }; }
+    const signature = fences.map((item) => `${item.id}:${item.x}:${item.z}:${item.rotation}`).join("|");
+    let saved = unit.fenceRoute;
+    if (!saved || saved.signature !== signature || Math.hypot(saved.goalX - targetX, saved.goalZ - targetZ) > 3 || !saved.points.length) {
+      const points = [[unit.x, unit.z], [targetX, targetZ], ...fences.flatMap((item) => footprint(item, 1.05))];
+      const distance = Array(points.length).fill(Infinity), previous = Array(points.length).fill(-1), visited = new Set();
+      distance[0] = 0;
+      while (visited.size < points.length) {
+        let current = -1;
+        for (let index = 0; index < points.length; index++) if (!visited.has(index) && (current < 0 || distance[index] < distance[current])) current = index;
+        if (current < 0 || !Number.isFinite(distance[current]) || current === 1) break;
+        visited.add(current);
+        for (let index = 1; index < points.length; index++) {
+          if (visited.has(index) || !segmentOpen(battle, ...points[current], ...points[index], fences)) continue;
+          const nextDistance = distance[current] + Math.hypot(points[index][0] - points[current][0], points[index][1] - points[current][1]);
+          if (nextDistance < distance[index]) { distance[index] = nextDistance; previous[index] = current; }
+        }
+      }
+      const route = [];
+      if (Number.isFinite(distance[1])) for (let index = 1; index !== 0; index = previous[index]) route.unshift(points[index]);
+      saved = unit.fenceRoute = { signature, goalX: targetX, goalZ: targetZ, points: route };
+    }
+    while (saved.points.length && Math.hypot(saved.points[0][0] - unit.x, saved.points[0][1] - unit.z) < .7) saved.points.shift();
+    while (saved.points.length > 1 && segmentOpen(battle, unit.x, unit.z, ...saved.points[1], fences)) saved.points.shift();
+    return saved.points.length ? { x: saved.points[0][0], z: saved.points[0][1] } : { x: targetX, z: targetZ };
+  }
   function move(battle, unit, x, z) {
     if (unit.fieldworkTarget) return;
     if (unit.ambush && !unit.revealed) return;
@@ -332,8 +473,16 @@
     const gates = battle.defending && unit.side === "defender" ? battle.structures.filter((structure) => (structure.kind || structure.type) === "gate" && !structure.passable) : [];
     // A garrison can use its own gate for a sortie; enemies must break it.
     for (const gate of gates) gate.passable = true;
-    const countrysideTarget = root.TenkaBattlefield?.navigationTarget(battle, unit, x, z);
+    const avoidFences = regionalRules(battle) ? (battle.fortifications || []).filter((item) => item.kind === "palisade" && item.hp > 0 && (item.side === unit.side || unit.order === "retreat")) : [];
+    const navigation = avoidFences.length ? {
+      key: avoidFences.map((item) => `${item.id}:${item.x}:${item.z}:${item.rotation}`).join("|"),
+      blocked: (px, pz, padding = .7) => avoidFences.some((item) => fortificationContains(item, px, pz, padding)),
+      segmentBlocked: (ax, az, bx, bz, padding = .7) => avoidFences.some((item) => segmentHits(item, ax, az, bx, bz, padding)),
+    } : undefined;
+    const countrysideTarget = root.TenkaBattlefield?.navigationTarget(battle, unit, x, z, navigation);
     if (countrysideTarget) { x = countrysideTarget.x; z = countrysideTarget.z; }
+    const detour = fenceNavigationTarget(battle, unit, x, z);
+    x = detour.x; z = detour.z;
     original.move(battle, unit, x, z);
     const factor = (FORMATIONS[unit.formation] || FORMATIONS.line).speed * (root.TenkaBattlefield?.movementFactor(battle.layout, { ...unit, x: oldX, z: oldZ }) ?? 1);
     if (factor !== 1) {
@@ -342,12 +491,16 @@
     }
     if (root.TenkaBattlefield?.blocked(battle.layout, unit.x, unit.z, 0) && unit.type !== "navy") { unit.x = oldX; unit.z = oldZ; }
     for (const gate of gates) gate.passable = false;
-    const obstruction = unit.type !== "navy" && (battle.fortifications || []).find((item) => item.hp > 0 && item.kind === "palisade" && item.side !== unit.side && segmentHits(item, oldX, oldZ, unit.x, unit.z, 0.45));
+    const obstruction = unit.type !== "navy" && (battle.fortifications || []).find((item) => {
+      if (item.hp <= 0 || item.kind !== "palisade" || (!regionalRules(battle) && item.side === unit.side) || !segmentHits(item, oldX, oldZ, unit.x, unit.z, .45)) return false;
+      if (regionalRules(battle) && fortificationContains(item, oldX, oldZ, .45) && fencePenetration(item, unit.x, unit.z) < fencePenetration(item, oldX, oldZ) - 1e-8) return false;
+      return true;
+    });
     if (obstruction) {
       unit.x = oldX; unit.z = oldZ;
       // Even after the garrison is defeated, a surviving fence on the final
       // route to the bailey must be attacked instead of causing a path stall.
-      if (unit.order !== "retreat") {
+      if (unit.order !== "retreat" && obstruction.side !== unit.side) {
         obstruction.hp = Math.max(0, obstruction.hp - original.damage(battle, unit, obstruction, true));
         unit.fieldworkTarget = obstruction.id;
       }
@@ -443,7 +596,7 @@
     try {
       if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
       const battlefieldVersion = battle.battlefieldVersion ?? 0;
-      if (![0, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
+      if (![0, 1, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
       let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion });
       for (const record of battle.ledger) {
         if (["deploy", "order", "formation", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {

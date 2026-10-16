@@ -47,7 +47,8 @@ test('all three battle modes expose placement tools before any troop is selected
   assert.match(content(tree),/配置範囲.*東西/);
   assert.ok(control(tree,'input','陣・柵の東西座標'));
   assert.ok(control(tree,'select','陣・柵の向き'));
-  assert.match(content(tree),/敵の進路を阻み/);
+  assert.match(content(tree),/両軍の通行を遮る/);
+  assert.match(content(tree),/味方は迂回/);
  }
 });
 

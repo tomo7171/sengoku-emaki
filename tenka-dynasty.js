@@ -408,21 +408,28 @@
     naturalDeaths(s); addHistorical(s); updateFamilies(s);
     proceduralBirths(s); updateFamilies(s); renewMarriages(s); d.initialized = true; return s;
   }
-  function candidate(s, clan = s.playerClan) {
-    const rec = s.tenka.dynasty.recruitment[clan], sequence = rec?.turn === s.turn ? rec.count || 0 : 0;
+  function candidate(s, clan = s.playerClan, sequence = 0, usedNames = new Set()) {
     const id = `dyn-recruit-${clan}-${s.turn}-${sequence}`, seed = hash(id), names = ['庄田', '岩村', '中島', '稲葉', '村井', '山岡', '三田', '大沢', '河村', '小坂'];
     const givens = ['宗直', '景久', '義綱', '清成', '盛忠', '信重', '晴綱', '忠俊', '景長', '正継'];
     let name = names[seed % names.length] + givens[(seed >>> 8) % givens.length];
-    if (s.officers.some(o => o.name === name)) name += `（${s.turn}-${sequence + 1}）`;
+    if (usedNames.has(name)) name += `（${s.turn}-${sequence + 1}）`;
+    usedNames.add(name);
     const emergency = !s.officers.some(o => o.clan === clan && adult(s, o));
-    const person = createOfficer(s, { id, name, clan, castleId: owned(s, clan)[0]?.id, birth: s.year - (20 + seed % 20), origin: 'fictional' });
-    return { ...person, age: age(s, person), cost: emergency ? 0 : 150, commandCost: emergency ? 0 : 1, emergency,
+    const home = owned(s, clan)[seed % Math.max(1, owned(s, clan).length)];
+    const person = createOfficer(s, { id, name, clan, castleId: home?.id, birth: s.year - (20 + seed % 20), origin: 'fictional' });
+    return { ...person, originPlace: home?.province || home?.name || '自領', age: age(s, person), cost: emergency ? 0 : 150, commandCost: emergency ? 0 : 1, emergency,
       description: emergency ? '成人の家臣がいないため、在地の人材が無償で仕官。担当武将・命令は不要。' : '架空の在地人材。必ず登用でき、担当武将は不要。金150貫・命令1。' };
   }
   function recruits(s) {
-    const local = candidate(s);
-    const ronin = s.officers.filter(o => o.status === 'ronin' && age(s, o) >= 15 && !female(o)).map(o => ({ ...o, age: age(s, o), cost: local.cost, commandCost: local.commandCost, emergency: local.emergency, description: '浪人を新たな家臣として登用。担当武将は不要。' }));
-    return [local, ...ronin];
+    const prefix = `dyn-recruit-${s.playerClan}-${s.turn}-`;
+    // Build the entire seasonal pool before filtering hires so its names and abilities
+    // stay stable when another candidate is hired or the save is loaded again.
+    const usedNames = new Set(s.officers.filter(o => !o.id.startsWith(prefix)).map(o => o.name));
+    const pool = Array.from({ length: 8 }, (_, sequence) => candidate(s, s.playerClan, sequence, usedNames));
+    const local = pool.filter(o => !s.officers.some(person => person.id === o.id));
+    const costs = pool[0];
+    const ronin = s.officers.filter(o => o.status === 'ronin' && age(s, o) >= 15 && !female(o)).map(o => ({ ...o, originPlace: '浪人', age: age(s, o), cost: costs.cost, commandCost: costs.commandCost, emergency: costs.emergency, description: '浪人を新たな家臣として登用。担当武将は不要。' }));
+    return [...local, ...ronin];
   }
   function related(s, a, b) {
     const ancestors = o => { const ids = new Set([o.id]); let frontier = [o]; for (let i = 0; i < 3; i++) { const next = []; for (const p of frontier) for (const id of [p.fatherId, p.motherId]) { if (id) ids.add(id); const parent = officer(s, id); if (parent) next.push(parent); } frontier = next; } return ids; };
@@ -443,6 +450,7 @@
     if (!f || !owned(s, clan).length) return fail('領地のある大名家で実行してください。');
     let message;
     if (action.type === 'recruit') {
+      const destination = owned(s, clan).find(c => c.id === action.orderCastleId) || owned(s, clan)[0];
       const choices = recruits(s), selected = action.candidateId ? choices.find(o => o.id === action.candidateId) : choices[0];
       if (!selected) return fail('登用候補が変わりました。現在の候補を選んでください。');
       const record = d.recruitment[clan];
@@ -451,9 +459,9 @@
       if ((s.actionPoints || 0) < selected.commandCost) return fail('登用には命令1が必要です。季節を進めると回復します。');
       let person = officer(s, selected.id);
       if (person && person.status !== 'ronin') return fail('その人物は現在登用できません。');
-      if (person) Object.assign(person, { clan, castleId: owned(s, clan)[0].id, status: 'active', capturedBy: null, isKin: false });
+      if (person) Object.assign(person, { clan, castleId: destination.id, status: 'active', capturedBy: null, isKin: false });
       else {
-        person = createOfficer(s, { id: selected.id, name: selected.name, clan, castleId: owned(s, clan)[0].id, birth: selected.birth, gender: 'male', origin: 'fictional', stats: [selected.leadership, selected.valor, selected.intelligence, selected.politics] });
+        person = createOfficer(s, { id: selected.id, name: selected.name, clan, castleId: destination.id, birth: selected.birth, gender: 'male', origin: 'fictional', stats: [selected.leadership, selected.valor, selected.intelligence, selected.politics] });
         s.officers.push(person);
       }
       s.gold -= selected.cost; s.actionPoints -= selected.commandCost; s.tenka.loyalty[person.id] = 82;

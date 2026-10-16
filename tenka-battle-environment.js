@@ -35,6 +35,23 @@
     const angle = item.rotation || 0;
     return [item.x + Math.cos(angle) * x - Math.sin(angle) * z, item.z + Math.sin(angle) * x + Math.cos(angle) * z];
   }
+  function regionalStyle(profile) {
+    const defaults = { broadleaf: ["#405a35", "#84915b"], evergreen: ["#314c35", "#69805a"], stone: ["#676b5d", "#979580"], grass: ["#68734b", "#9b9b62"] };
+    if (!profile) return defaults;
+    if (profile.id === "ryukyu") return { broadleaf: ["#315d3f", "#799b57"], evergreen: ["#3b6445", "#78935c"], stone: ["#99968a", "#c6beaa"], grass: ["#6b8548", "#a9ad63"] };
+    if (profile.id === "coast") return { broadleaf: ["#4a6037", "#8b965e"], evergreen: ["#3f5e42", "#819261"], stone: ["#777b72", "#a7a899"], grass: ["#7b8255", "#aaa46d"] };
+    if (profile.id === "northern-coast") return { broadleaf: ["#395642", "#81947a"], evergreen: ["#2d4b3d", "#65816b"], stone: ["#5b6869", "#929d98"], grass: ["#65764f", "#96a17a"] };
+    if (profile.id === "mountain") return { broadleaf: ["#365538", "#7a8b59"], evergreen: ["#2b4934", "#627d51"], stone: ["#5c635e", "#8f9384"], grass: ["#60744b", "#92966a"] };
+    return defaults;
+  }
+  function woodlandPoint(region, random) {
+    if (region.polygon?.length) {
+      const xs = region.polygon.map(point => point[0]), zs = region.polygon.map(point => point[1]);
+      return [Math.min(...xs) + random() * (Math.max(...xs) - Math.min(...xs)), Math.min(...zs) + random() * (Math.max(...zs) - Math.min(...zs))];
+    }
+    const diameter = Number.isFinite(region.radius) ? region.radius * 2 : 18;
+    return localPoint(region, (random() - .5) * (region.w ?? region.width ?? diameter), (random() - .5) * (region.d ?? region.depth ?? diameter));
+  }
   function clearOfFeatures(layout, battle, x, z, radius, waterAt) {
     if (waterAt?.(x, z) || (layout.water || []).some(water => inside(x, z, water.polygon))) return false;
     // The outer crown must also clear a water bank, not merely its trunk.
@@ -69,13 +86,18 @@
     const bounds = boundsOf(layout), random = randomFor(`${layout.id || battle.targetId || "battle"}:landscape-v2`);
     const mountain = ["mountain", "hill"].includes(layout.biome || battle.targetCastle?.terrain);
     const trees = [], rocks = [], grasses = [], ridges = [];
-    const world = layout.landscape, wide = !!world?.version;
+    const world = layout.landscape, wide = !!world?.version, regional = world?.version >= 2;
+    const profile = regional ? world.profile : undefined, style = regionalStyle(profile);
     const fields = (world?.fields || []).map(field => ({ ...field }));
     const settlements = (world?.settlements || []).map(settlement => ({ ...settlement, houses: (settlement.houses || []).map(house => ({ ...house })) }));
-    const treeLimit = wide ? (mountain ? 220 : 190) : (mountain ? 118 : 86);
-    for (let index = 0; index < (wide ? 4500 : 1600) && trees.length < treeLimit; index++) {
-      const x = bounds.minX + 3 + random() * (bounds.maxX - bounds.minX - 6);
-      const z = bounds.minZ + 2 + random() * (bounds.maxZ - bounds.minZ - 4);
+    const treeLimit = regional ? clamp(Math.round(190 + (profile?.forestDensity ?? .65) * 100), 220, 280) : wide ? (mountain ? 220 : 190) : (mountain ? 118 : 86);
+    for (let index = 0; index < (regional ? 7200 : wide ? 4500 : 1600) && trees.length < treeLimit; index++) {
+      // Sample the actual woodland parcels in turn, rather than scattering a
+      // tenfold number of trees across the enlarged map. Both nearby castle
+      // woods and distant regional ridges retain visible, bounded clusters.
+      const region = regional && world.forests?.length && index % 6 !== 5 ? world.forests[(index - Math.floor(index / 6)) % world.forests.length] : null;
+      const [x, z] = region ? woodlandPoint(region, random) : [bounds.minX + 3 + random() * (bounds.maxX - bounds.minX - 6), bounds.minZ + 2 + random() * (bounds.maxZ - bounds.minZ - 4)];
+      if (x < bounds.minX + 2 || x > bounds.maxX - 2 || z < bounds.minZ + 2 || z > bounds.maxZ - 2) continue;
       // Preserve the broad central view of the castle, as well as the actual
       // footpaths. Trees frame the flanks and rear instead of hiding the gates.
       if ((Math.abs(x) < 18 && (!wide || z > -55 && z < 42)) || (z > 4 && z < 42 && Math.abs(x) < 26)) continue;
@@ -86,9 +108,15 @@
       if (trees.some(tree => Math.hypot(x - tree.x, z - tree.z) < (tree.size + size) * 1.5)) continue;
       const y = heightAt(x, z);
       if (!Number.isFinite(y)) continue;
-      trees.push({ x, y, z, size, angle: random() * Math.PI * 2, tint: random(), kind: forest?.kind === "cedar" || random() < (mountain ? .55 : .24) ? "cedar" : "broadleaf", distant: wide && Math.hypot(x, z + 25) > 65 });
+      let kind;
+      if (regional) {
+        const localKind = ["cedar", "pine", "broadleaf"].includes(forest?.kind) ? forest.kind : profile?.treeKind;
+        kind = ["cedar", "pine", "broadleaf"].includes(localKind) ? localKind : random() < (mountain ? .55 : .24) ? "cedar" : "broadleaf";
+      } else kind = forest?.kind === "cedar" || random() < (mountain ? .55 : .24) ? "cedar" : "broadleaf";
+      trees.push({ x, y, z, size, angle: random() * Math.PI * 2, tint: random(), kind, distant: wide && Math.hypot(x, z + 25) > (regional ? 90 : 65) });
     }
-    for (let index = 0; index < (wide ? 700 : 380) && rocks.length < (wide ? 90 : 56); index++) {
+    const rockLimit = regional ? profile?.id === "mountain" || profile?.id === "northern-coast" ? 100 : 80 : wide ? 90 : 56;
+    for (let index = 0; index < (regional ? 1400 : wide ? 700 : 380) && rocks.length < rockLimit; index++) {
       const x = bounds.minX + 2 + random() * (bounds.maxX - bounds.minX - 4), z = bounds.minZ + 2 + random() * (bounds.maxZ - bounds.minZ - 4);
       if (Math.abs(x) < 19 || !clearOfFeatures(layout, battle, x, z, .65, waterAt)) continue;
       const y = heightAt(x, z);
@@ -103,7 +131,7 @@
     }
     // Expanded battlefields already provide true playable mountains and valleys.
     // Do not hide them beneath the old, uniform external background surface.
-    if (wide) return { trees, rocks, grasses, ridges, fields, settlements, bounds, wide: true };
+    if (wide) return { trees, rocks, grasses, ridges, fields, settlements, bounds, wide: true, regional, profile: profile ? { ...profile } : null, style };
     // A coast's sea is rendered beyond its collision polygon. Keep the horizon
     // ridge on the opposite, inland side instead of floating over that sea.
     const sea = (layout.water || []).find(water => water.type === "sea");
@@ -129,7 +157,7 @@
       points.push(axis === "z" ? { x: along, z: outward, y: height } : { x: outward, z: along, y: height });
     }
     ridges.push({ layer: 0, axis, inland, columns, rows, points, reconstruction: "distant-heightfield" });
-    return { trees, rocks, grasses, ridges, fields, settlements, bounds, wide: false };
+    return { trees, rocks, grasses, ridges, fields, settlements, bounds, wide: false, regional: false, profile: null, style };
   }
 
   function create(THREE, options = {}) {
@@ -137,6 +165,7 @@
     if (!required.every(name => typeof THREE?.[name] === "function") || !options.scene?.add) return null;
     const landscape = plan(options), group = new THREE.Group(), meshes = [], geometries = new Set(), materials = new Set();
     group.name = "tenka-detailed-battle-landscape";
+    group.userData.regionalLandscape = landscape.profile ? { ...landscape.profile } : null;
     const geometry = value => { geometries.add(value); options.trackGeometry?.(value); return value; };
     const material = (color, extra = {}) => {
       const value = new THREE.MeshStandardMaterial({ color, roughness: .98, metalness: 0, ...extra });
@@ -166,7 +195,7 @@
     }
     const trunk = [], branches = [], crowns = [], cedarWhorls = [], roots = [];
     for (const tree of landscape.trees) {
-      const { x, y, z, size, angle } = tree, cedar = tree.kind === "cedar", height = (cedar ? 5.2 : 3.7) * size;
+      const { x, y, z, size, angle } = tree, cedar = tree.kind === "cedar", pine = tree.kind === "pine", height = (cedar ? 5.2 : pine ? 4.4 : 3.7) * size;
       trunk.push({ x, y: y + height * .43, z, angle, sx: .2 * size, sy: height * .86, sz: .2 * size });
       for (let index = 0; index < (tree.distant ? 0 : 3); index++) {
         const direction = angle + index * Math.PI * 2 / 3;
@@ -176,13 +205,13 @@
         for (let level = 0; level < (tree.distant ? 3 : 5); level++) {
           const tier = tree.distant ? level * 1.55 : level;
           const width = (1.52 - tier * .26) * size;
-          cedarWhorls.push({ x, y: y + (1.8 + tier * .64) * size, z, angle: angle + level * .73, sx: width, sy: (1.1 - tier * .07) * size, sz: width, color: tinted("#314c35", "#69805a", tree.tint * .65 + tier * .055) });
+          cedarWhorls.push({ x, y: y + (1.8 + tier * .64) * size, z, angle: angle + level * .73, sx: width, sy: (1.1 - tier * .07) * size, sz: width, color: tinted(...landscape.style.evergreen, tree.tint * .65 + tier * .055) });
         }
       } else {
         for (let index = 0; index < (tree.distant ? 3 : 5); index++) {
           const direction = angle + index * Math.PI * 2 / 5, offset = (index === 4 ? .16 : .76) * size;
           const top = y + height * (index === 4 ? 1.1 : .83 + (index % 2) * .17);
-          crowns.push({ x: x + Math.sin(direction) * offset, y: top, z: z + Math.cos(direction) * offset, angle: direction, sx: (1.12 + (index % 2) * .16) * size, sy: (1 + (index % 3) * .17) * size, sz: 1.04 * size, color: tinted("#405a35", "#84915b", clamp(tree.tint * .6 + index * .065, 0, 1)) });
+          crowns.push({ x: x + Math.sin(direction) * offset * (pine ? 1.35 : 1), y: top, z: z + Math.cos(direction) * offset * (pine ? 1.35 : 1), angle: direction, sx: (1.12 + (index % 2) * .16) * size * (pine ? 1.25 : 1), sy: (pine ? .48 : 1 + (index % 3) * .17) * size, sz: (pine ? 1.3 : 1.04) * size, color: tinted(...(pine ? landscape.style.evergreen : landscape.style.broadleaf), clamp(tree.tint * .6 + index * .065, 0, 1)) });
           if (index < 3 && !tree.distant) branches.push({ x: x + Math.sin(direction) * .34 * size, y: y + height * .68, z: z + Math.cos(direction) * .34 * size, angle: direction, rx: .68, sx: .11 * size, sy: 1.5 * size, sz: .11 * size });
         }
       }
@@ -221,7 +250,7 @@
       rockPosition.setXYZ(index, x * (1 + Math.sin(y * 8 + z * 6) * .17), y * .67, z * (1 + Math.cos(x * 9 - y * 7) * .15));
     }
     rockShape.computeVertexNormals();
-    instances("weathered-rocks-at-woodland-edge", rockShape, stoneMaterial, landscape.rocks.map(rock => ({ ...rock, y: rock.y + rock.size * .15, sx: rock.size, sy: rock.size, sz: rock.size * .8, color: tinted("#676b5d", "#979580", rock.tint) })));
+    instances("weathered-rocks-at-woodland-edge", rockShape, stoneMaterial, landscape.rocks.map(rock => ({ ...rock, y: rock.y + rock.size * .15, sx: rock.size, sy: rock.size, sz: rock.size * .8, color: tinted(...landscape.style.stone, rock.tint) })));
     const blades = [];
     for (let index = 0; index < 4; index++) {
       const angle = index * Math.PI / 4, x = Math.cos(angle) * .2, z = Math.sin(angle) * .2;
@@ -230,7 +259,7 @@
     const grassShape = geometry(new THREE.BufferGeometry());
     grassShape.setAttribute("position", new THREE.Float32BufferAttribute(blades, 3)); grassShape.computeVertexNormals();
     grassMaterial.side = 2;
-    instances("sparse-grasses-under-trees", grassShape, grassMaterial, landscape.grasses.map(grass => ({ ...grass, sx: grass.size, sy: grass.size, sz: grass.size, color: tinted("#68734b", "#9b9b62", grass.tint) })), false);
+    instances("sparse-grasses-under-trees", grassShape, grassMaterial, landscape.grasses.map(grass => ({ ...grass, sx: grass.size, sy: grass.size, sz: grass.size, color: tinted(...landscape.style.grass, grass.tint) })), false);
     const terrainHeight = (x, z) => {
       const height = options.heightAt?.(x, z);
       return Number.isFinite(height) ? height : 0;
@@ -265,7 +294,8 @@
       // Shallow irrigation channels follow the same terrain as the field banks.
       terrainStrip(field, -w / 2 - .64, -depth / 2, -w / 2 - .3, depth / 2, surfacePatches.canal, .065);
       if (field.kind === "paddy") terrainStrip(field, -w / 2 - .64, depth / 2 + .3, w / 2, depth / 2 + .62, surfacePatches.canal, .065);
-      const cropColumns = Math.min(15, Math.max(4, Math.round(w / 1.12))), cropRows = Math.min(15, Math.max(4, Math.round(depth / 1.35)));
+      const cropLimit = landscape.regional && Math.hypot(field.x, field.z + 25) > 90 ? 8 : 15;
+      const cropColumns = Math.min(cropLimit, Math.max(4, Math.round(w / 1.12))), cropRows = Math.min(cropLimit, Math.max(4, Math.round(depth / 1.35)));
       for (let row = 0; row < cropRows; row++) for (let column = 0; column < cropColumns; column++) {
         const lx = -w / 2 + (column + .5) * w / cropColumns, lz = -depth / 2 + (row + .5) * depth / cropRows;
         const [x, z] = localPoint(field, lx, lz), tint = ((row * 7 + column * 3) % 17) / 17;
@@ -357,7 +387,7 @@
     let disposed = false;
     return {
       group, meshes,
-      stats: { trees: landscape.trees.length, rocks: landscape.rocks.length, grassClumps: landscape.grasses.length, fields: landscape.fields.length, houses: landscape.settlements.reduce((sum, settlement) => sum + settlement.houses.length, 0), drawCalls: meshes.length, decorativeOnly: true },
+      stats: { trees: landscape.trees.length, distantTrees: landscape.trees.filter(tree => tree.distant).length, rocks: landscape.rocks.length, grassClumps: landscape.grasses.length, fields: landscape.fields.length, houses: landscape.settlements.reduce((sum, settlement) => sum + settlement.houses.length, 0), drawCalls: meshes.length, decorativeOnly: true, regionalProfile: landscape.profile?.id || null },
       dispose() {
         if (disposed) return; disposed = true;
         if (group.removeFromParent) group.removeFromParent(); else options.scene.remove?.(group);

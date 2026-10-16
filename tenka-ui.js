@@ -60,6 +60,8 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
  const fallback=['政務','家臣'].includes(tab)?view.administrationFallback:null;
  const chosen=available.find(o=>o.id===officerId)||available[0]||fallback;
  const castle=owned.find(c=>c.id===castleId)||owned[0];
+ const castleRemaining=global.TenkaOrders?.remaining(state,castle?.id)??state.actionPoints;
+ const castleOrders=c=>global.TenkaOrders?.remaining(state,c.id)??state.actionPoints;
  const target=enemies.find(c=>c.id===targetId)||enemies[0];
  const opposition=state.officers.filter(o=>o.clan===target?.clan&&o.status==='active'&&(o.birth==null||state.year-o.birth>=15));
  const prisoners=state.officers.filter(o=>o.status==='captive'&&o.capturedBy===state.playerClan);
@@ -71,13 +73,13 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
  };
  const act=(type,extra={})=>{
    if(!canAssign(type)){report({ok:false,message:'担当できる武将がいません。家臣の登用、または次の季節へ進んで任務の完了をお待ちください。'});return;}
-   const result=systems.act(state,{type,castleId:['negotiation','infiltrate'].includes(type)?target?.id:castle?.id,targetCastleId:target?.id,targetClan:target?.clan,officerId:chosen?.id,targetOfficerId:extra.targetOfficerId||targetOfficerId||opposition[0]?.id,...extra});
+   const result=systems.act(state,{type,castleId:['negotiation','infiltrate'].includes(type)?target?.id:castle?.id,orderCastleId:castle?.id,targetCastleId:target?.id,targetClan:target?.clan,officerId:chosen?.id,targetOfficerId:extra.targetOfficerId||targetOfficerId||opposition[0]?.id,...extra});
    report(result);
  };
- const dynastyAct=(type,extra={})=>{if(dynasty)report(dynasty.act(state,{type,...extra}));};
+ const dynastyAct=(type,extra={})=>{if(dynasty)report(dynasty.act(state,{type,orderCastleId:castle?.id,...extra}));};
  const field=(title,child)=>h('label',{className:'tenka-field'},h('span',null,title),child);
  const selector=(value,onChange,options,aria)=>h('select',{'aria-label':aria,value,disabled:!options.some(o=>!o.disabled),onChange:e=>onChange(e.target.value)},options.length?options.map(o=>h('option',{key:o.id,value:o.id,disabled:!!o.disabled},o.label)):h('option',{value:''},'選択できる人物がいません'));
- const actions=(type,title,text)=>h('button',{key:type,className:'tenka-action',disabled:state.actionPoints<1||!!state.pendingDefense||!canAssign(type),onClick:()=>act(type)},h('strong',null,title),h('span',null,text),h('small',null,'金 '+format(systems.ACTIONS[type]?.gold)+' 貫 ／ 兵糧 '+format(systems.ACTIONS[type]?.food)+' 石 ・ 命令1 →'));
+ const actions=(type,title,text)=>h('button',{key:type,className:'tenka-action',disabled:castleRemaining<1||!!state.pendingDefense||!canAssign(type),onClick:()=>act(type)},h('strong',null,title),h('span',null,text),h('small',null,'金 '+format(systems.ACTIONS[type]?.gold)+' 貫 ／ 兵糧 '+format(systems.ACTIONS[type]?.food)+' 石 ・ '+(castle?.name||'選択した城')+'の命令1 →'));
  const metric=(title,value,note)=>h('div',{className:'tenka-metric',key:title},h('small',null,title),h('strong',null,value),h('span',null,note));
  const economy=(view.castles||[]).find(c=>c.id===castle?.id)||castle;
  const loyalty=officer=>officer.loyalty??state.tenka?.loyalty?.[officer.id]??70;
@@ -102,16 +104,16 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    const cost=candidate.cost??(delegates.length?150:0);
    const orderCost=candidate.commandCost??(delegates.length?1:0);
    const full=recruitmentFull&&!candidate.emergency;
-   return h('button',{className:compact?'tenka-primary-button':'',disabled:full||!!state.pendingDefense||state.actionPoints<orderCost||(state.gold||0)<cost,onClick:()=>dynastyAct('recruit',{candidateId:candidate.id})},full?'今季の登用は終了':compact?'家臣を登用する':'登用する',h('small',null,full?'次の季節に新たな人材を探す':'金 '+format(cost)+' 貫'+(orderCost?' ・ 命令1':' ・ 命令不要')));
+   return h('button',{className:compact?'tenka-primary-button':'','aria-label':candidate.name+'を登用',disabled:full||!!state.pendingDefense||castleRemaining<orderCost||(state.gold||0)<cost,onClick:()=>dynastyAct('recruit',{candidateId:candidate.id})},full?'今季の登用は終了':compact?'家臣を登用する':'登用する',compact&&h('small',null,full?'次の季節に新たな人材を探す':'金 '+format(cost)+' 貫'+(orderCost?' ・ 命令1':' ・ 命令不要')));
  };
  return h('div',{className:'tenka-council'},
-  h('div',{className:'tenka-council-intro'},h('div',null,h('span',{className:'tenka-kicker'},'TENKA FUBU / 評定'),h('h3',null,'国を富ませ、人を用い、時を読む。'),h('p',null,'武将に役目を与え、領国の力を天下へつなぐ。担当武将は一季に一つの任務を務め、次の季節に再び働けます。')),h('div',{className:'tenka-season-control'},h('div',{className:'tenka-orders'},h('strong',null,state.actionPoints),h('span',null,'今季の命令')),onNextSeason&&h('button',{className:'tenka-next-season',disabled:!!state.pendingDefense,onClick:nextSeason},'次の季節へ →'),h('small',null,state.pendingDefense?'先に敵襲への対応を決めてください':state.year+'年 '+seasons[state.season]+' ／ 任務・命令を回復'))),
+  h('div',{className:'tenka-council-intro'},h('div',null,h('span',{className:'tenka-kicker'},'TENKA FUBU / 評定'),h('h3',null,'国を富ませ、人を用い、時を読む。'),h('p',null,'各城は一季に3回の命令を出せます。武将の任務は一季に一つ。命令と任務は次の季節に回復します。')),h('div',{className:'tenka-season-control'},h('div',{className:'tenka-orders'},h('strong',null,castleRemaining+' / 3'),h('span',null,(castle?.name||'選択した城')+'の今季の命令')),onNextSeason&&h('button',{className:'tenka-next-season',disabled:!!state.pendingDefense,onClick:nextSeason},'次の季節へ →'),h('small',null,state.pendingDefense?'先に敵襲への対応を決めてください':state.year+'年 '+seasons[state.season]+' ／ 各城ごとに命令を回復'))),
   h('nav',{className:'tenka-tabs','aria-label':'評定の項目'},['政務','外交','調略','家臣','一門・継承','軍学','年代記'].map(name=>h('button',{key:name,'aria-pressed':name===tab,onClick:()=>{setTab(name);setFeedback(null);}},name))),
   feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text),
   !available.length&&['政務','外交','調略','家臣'].includes(tab)&&h('aside',{className:'tenka-availability',role:'status'},h('div',null,h('strong',null,delegates.length?'成人武将は今季の任務に就いています。':'登用や元服で家臣団を整えましょう。'),h('p',null,fallback?'奉行衆が開墾・商業・動員・褒賞・捕虜の解放を代行します。外交・調略・出陣には成人武将が必要です。':'次の季節へ進むと任務が完了します。成人武将がいない場合も、在地の人材を登用して再起できます。')),h('div',{className:'tenka-inline-actions'},recruits[0]&&recruitButton(recruits[0],true),h('button',{onClick:()=>setTab('家臣')},'人材を確認する'))),
   ['政務','外交','調略','家臣'].includes(tab)&&h('div',{className:'tenka-assignment'},
    field('担当武将',selector(chosen?.id||'',setOfficer,[...(!chosen?[{id:'',label:'任務可能な成人武将がいません',disabled:true}]:[]),...delegates.map(o=>({id:o.id,label:o.name+' ／ 政'+o.politics+'・知'+o.intelligence+(o.busy?'・任務中（次季に復帰）':''),disabled:!!o.busy})),...(fallback?[{id:fallback.id,label:'奉行衆 ／ 政務を代行'}]:[])],'評定の担当武将')),
-   tab==='政務'&&field('領地',selector(castle?.id||'',setCastle,owned.map(c=>({id:c.id,label:c.name+' ／ '+c.province})),'政務を行う領地')),
+   field('命令を出す城',selector(castle?.id||'',setCastle,owned.map(c=>({id:c.id,label:c.name+' ／ '+(c.province||'自領')+' ／ 命令 '+castleOrders(c)+' / 3'})),'命令を出す城')),
    ['外交','調略'].includes(tab)&&field('相手の勢力・拠点',selector(target?.id||'',setTarget,enemies.map(c=>({id:c.id,label:c.clanName+' ／ '+c.name})),'交渉先の拠点')),
    chosen&&h('div',{className:'tenka-delegate'},chosen.administrative?h('span',{className:'tenka-administration-seal','aria-hidden':true},'奉行'):h(Portrait,{officer:chosen,year:state.year}),h('div',null,h('strong',null,chosen.name),h('small',null,chosen.administrative?'武将が不在の間、領国の政務を代行':'統率 '+chosen.leadership+' ／ 政治 '+chosen.politics+' ／ 知略 '+chosen.intelligence)))),
   tab==='政務'&&castle&&h('section',null,
@@ -128,15 +130,15 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    h('div',{className:'tenka-action-grid'},actions('infiltrate','内応の密約','知略に長けた家臣を送り、敵将の忠誠を揺さぶります。疲弊した守備と低い忠誠は離反の機会になります。')),
    h('p',{className:'tenka-note'},'結果は担当武将の知略・対象の忠誠・領国の疲弊に左右されます。戦場で兵を減らすだけでなく、家臣の結束も守りましょう。')),
   tab==='家臣'&&h('section',null,
-   h('div',{className:'tenka-section-heading'},h('h4',null,'新たな家臣の登用'),h('span',null,'担当武将がいなくても登用できます')),
+   h('div',{className:'tenka-section-heading'},h('h4',null,'新たな家臣の登用'),h('span',null,'候補 '+recruits.length+' 人 ／ 今季あと '+Math.max(0,2-(recruitmentRecord?.turn===state.turn?recruitmentRecord.count||0:0))+' 人を登用できます')),
    h('p',{className:'tenka-note'},'各地の在地人材と仕官を求める浪人を登用します。史実の人物は生年に応じて誕生・元服し、この年代記で生まれる子や在地人材は創作の人物として区別します。成人武将が一人もいない場合、最初の登用は金・命令を消費しません。'),
-   recruits.length?h('div',{className:'tenka-officer-grid'},recruits.map(o=>h('article',{className:'tenka-officer tenka-recruit',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)),h('small',null,'統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),o.description&&h('small',null,o.description),recruitButton(o))))):h('p',{className:'tenka-note'},'今季の仕官希望者はいません。次の季節に新たな在地人材を探せます。'),
+   recruits.length?h('div',{className:'tenka-recruit-list'},h('table',{className:'tenka-recruit-table','aria-label':'登用候補の一覧'},h('caption',null,'在地人材8人と仕官を求める浪人を比較できます。登用済みの候補は一覧から除かれます。'),h('thead',null,h('tr',null,['武将','出自・年齢','統率','武勇','知略','政治','費用','登用'].map(label=>h('th',{key:label,scope:'col'},label)))),h('tbody',null,recruits.map(o=>h('tr',{key:o.id,'data-candidate-id':o.id},h('th',{scope:'row','data-label':'武将'},h('div',{className:'tenka-recruit-person'},h(Portrait,{officer:o,year:state.year,size:48}),h('strong',null,o.name))),h('td',{'data-label':'出自・年齢'},h('span',null,(o.originPlace||'浪人')+' ／ '+ageLabel(o)),h('small',null,originLabel(o))),...['leadership','valor','intelligence','politics'].map((stat,i)=>h('td',{key:stat,'data-label':['統率','武勇','知略','政治'][i],className:'tenka-recruit-stat'},o[stat])),h('td',{'data-label':'費用'},format(o.cost??150)+' 貫',h('small',null,o.commandCost===0?'命令不要':'命令1')),h('td',{'data-label':'登用'},recruitButton(o))))))):h('p',{className:'tenka-note'},'今季の仕官希望者はいません。次の季節に新たな在地人材を探せます。'),
    h('div',{className:'tenka-section-heading'},h('h4',null,'家臣団'),h('span',null,'武将ごとに異なる創作肖像・能力・忠誠')),
-   roster.some(o=>o.status==='active')?h('div',{className:'tenka-officer-grid'},roster.filter(o=>o.status==='active').map(o=>h('article',{className:'tenka-officer',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)+(o.busy?' ／ 今季は任務中':'')),h('small',null,'忠誠 '+loyalty(o)+' ／ 統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('button',{disabled:state.actionPoints<1||!!state.pendingDefense||!canAssign('reward'),onClick:()=>act('reward',{targetOfficerId:o.id})},'加増・褒賞'))))):h('p',{className:'tenka-note'},'成人の家臣がいません。上の「新たな家臣の登用」から人材を迎えてください。領国の政務は奉行衆が支えます。'),
+   roster.some(o=>o.status==='active')?h('div',{className:'tenka-officer-grid'},roster.filter(o=>o.status==='active').map(o=>h('article',{className:'tenka-officer',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)+(o.busy?' ／ 今季は任務中':'')),h('small',null,'忠誠 '+loyalty(o)+' ／ 統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('button',{disabled:castleRemaining<1||!!state.pendingDefense||!canAssign('reward'),onClick:()=>act('reward',{targetOfficerId:o.id})},'加増・褒賞'))))):h('p',{className:'tenka-note'},'成人の家臣がいません。上の「新たな家臣の登用」から人材を迎えてください。領国の政務は奉行衆が支えます。'),
    h('div',{className:'tenka-section-heading'},h('h4',null,'捕らえた武将'),h('span',null,prisoners.length+' 人')),
-   prisoners.length?h('div',{className:'tenka-officer-grid'},prisoners.map(o=>h('article',{className:'tenka-officer prisoner',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('small',null,'統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('div',{className:'tenka-prisoner-actions'},['enlist','release','execute'].map(type=>h('button',{key:type,disabled:state.actionPoints<1||!!state.pendingDefense||!canAssign(type),onClick:()=>act(type,{targetOfficerId:o.id})},labels[type]))))))):h('p',{className:'tenka-note'},'捕虜はいません。落城・敗走時には武将の捕縛、討ち死に、逃亡が発生します。'),
+   prisoners.length?h('div',{className:'tenka-officer-grid'},prisoners.map(o=>h('article',{className:'tenka-officer prisoner',key:o.id},h(Portrait,{officer:o,year:state.year,size:70}),h('div',null,h('strong',null,o.name),h('small',null,'統'+o.leadership+' 武'+o.valor+' 知'+o.intelligence+' 政'+o.politics),h('div',{className:'tenka-prisoner-actions'},['enlist','release','execute'].map(type=>h('button',{key:type,disabled:castleRemaining<1||!!state.pendingDefense||!canAssign(type),onClick:()=>act(type,{targetOfficerId:o.id})},labels[type]))))))):h('p',{className:'tenka-note'},'捕虜はいません。落城・敗走時には武将の捕縛、討ち死に、逃亡が発生します。'),
    h('p',{className:'tenka-note'},'史実に登場する人物を収録しています。合戦後の生死・離反・登用は、この年代記での分岐です。'),
-   state.lastBattle&&h(BattleAftermath,{state,battle:state.lastBattle,onState,onNotify,compact:true})),
+   state.lastBattle&&h(BattleAftermath,{state,battle:state.lastBattle,onState,onNotify,selectedCastleId:castle?.id,compact:true})),
   tab==='一門・継承'&&h('section',{className:'tenka-family'},
    h('div',{className:'tenka-section-heading'},h('h4',null,'家を継ぎ、次の世代を育てる'),h('span',null,'家督の備え・一門の誕生・姫の婚姻')),
    h('div',{className:'tenka-family-leaders'},[['当主',family.head],['世継ぎ',family.heir],['後見役',family.regent]].map(([role,o])=>h('article',{className:'tenka-family-leader',key:role},h('span',{className:'tenka-person-tag'},role),o?h(React.Fragment,null,h(Portrait,{officer:o,year:state.year,size:68}),h('strong',null,o.name),h('small',null,ageLabel(o)+' ／ '+originLabel(o))):h('p',null,role==='後見役'?'未指定（幼主を支える成人武将）':'未指定')))),
@@ -163,8 +165,9 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    h('details',{className:'tenka-historical-note'},h('summary',null,'再現と史料について'),h('p',null,'武将名・旧国・主要拠点は1560年春を基準としています。石高・兵数・能力・兵科相性はゲーム用の推計です。城郭は特徴を反映した模式復元、肖像は個人ごとの創作表現で、実際の容貌や発掘図面の完全復元ではありません。')))
  );
 }
-function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,compact=false}){
+function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,selectedCastleId,compact=false}){
  const [officerId,setOfficer]=React.useState('');
+ const [castleId,setCastle]=React.useState(selectedCastleId||'');
  const [feedback,setFeedback]=React.useState(null);
  const [executionId,setExecution]=React.useState(null);
  if(!battle)return null;
@@ -175,13 +178,15 @@ function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,compact
  const available=(view.officers||[]).filter(o=>o.status==='active'&&(postVictory||o.available!==false&&!o.busy));
  const candidates=available.length?available:view.administrationFallback?[view.administrationFallback]:[];
  const delegate=candidates.find(o=>o.id===officerId)||candidates[0];
- const destination=state.castles.find(c=>c.clan===state.playerClan);
+ const owned=state.castles.filter(c=>c.clan===state.playerClan);
+ const destination=owned.find(c=>c.id===castleId)||global.TenkaOrders?.defaultCastle(state,selectedCastleId)||owned[0];
+ const remaining=global.TenkaOrders?.remaining(state,destination?.id)??state.actionPoints;
  const captives=model.rows.filter(o=>o.prisoner);
- const blocked=type=>!onState?'この記録からの命令はできません':state.pendingDefense?'先に敵襲への対応を決めてください':state.gameOver&&!postVictory?'この年代記は決着しました':!postVictory&&state.actionPoints<1?'今季の命令がありません。次の季節に処遇を決められます':!delegate?'担当できる成人武将がいません':delegate.administrative&&!delegate.allowedActions?.includes(type)?'説得・処断には成人武将が必要です':(state.gold||0)<(systems.ACTIONS[type]?.gold||0)?'金が不足しています':'';
+ const blocked=type=>!onState?'この記録からの命令はできません':state.pendingDefense?'先に敵襲への対応を決めてください':state.gameOver&&!postVictory?'この年代記は決着しました':!postVictory&&remaining<1?'この城の今季の命令がありません。別の城を選ぶか次の季節に処遇を決められます':!delegate?'担当できる成人武将がいません':delegate.administrative&&!delegate.allowedActions?.includes(type)?'説得・処断には成人武将が必要です':(state.gold||0)<(systems.ACTIONS[type]?.gold||0)?'金が不足しています':'';
  const decide=(type,row)=>{
   const reason=blocked(type);
   if(reason){setFeedback({id:row.officerId,ok:false,text:reason});return;}
-  const result=systems.act(state,{type,officerId:delegate.id,castleId:destination?.id,targetOfficerId:row.officerId});
+  const result=systems.act(state,{type,officerId:delegate.id,castleId:destination?.id,orderCastleId:destination?.id,targetOfficerId:row.officerId});
   setFeedback({id:row.officerId,ok:result.ok,text:result.message});setExecution(null);
   if(result.ok)onState?.(result.state);
   onNotify?.({text:result.message,success:result.ok});
@@ -191,7 +196,7 @@ function BattleAftermath({state,battle=state.lastBattle,onState,onNotify,compact
   model.legacy?h('p',{className:'tenka-note'},'この合戦は旧形式の記録のため、武将ごとの安否は記録されていません。現在の捕虜は「評定 → 家臣」で確認できます。次の合戦から人物別に記録します。'):h(React.Fragment,null,
    h('p',{className:'tenka-aftermath-summary',role:'status'},'討死 '+model.counts.killed+' 人 ／ 捕虜 '+model.counts.captured+' 人 ／ 生還・退却 '+model.counts.survived+' 人'),
    h('p',{className:'tenka-aftermath-note'},'当時の安否と現在の状態を表示します。兵士の損失には戦死・負傷・離散を含み、武将の討死とは別に記録します。'),
-   captives.length>0&&h('div',{className:'tenka-aftermath-delegate'},h('label',{className:'tenka-field'},h('span',null,'捕虜の処遇を命じる担当'),h('select',{'aria-label':'捕虜の処遇の担当武将',value:delegate?.id||'',disabled:!candidates.length,onChange:e=>setOfficer(e.target.value)},candidates.length?candidates.map(o=>h('option',{value:o.id,key:o.id},o.name+(o.administrative?' ／ 解放を代行':''))):h('option',{value:''},postVictory?'成人武将がいません':'未任務の成人武将がいません'))),h('small',null,(postVictory?'天下統一後の処遇は命令を消費しません。':'各処遇は命令1。')+'召し抱えは金 '+format(systems.ACTIONS.enlist.gold)+' 貫。奉行衆は解放を代行します。')),
+   captives.length>0&&h('div',{className:'tenka-aftermath-delegate'},h('label',{className:'tenka-field'},h('span',null,'捕虜の処遇を命じる城'),h('select',{'aria-label':'捕虜の処遇を命じる城',value:destination?.id||'',disabled:!owned.length,onChange:e=>setCastle(e.target.value)},owned.map(c=>h('option',{value:c.id,key:c.id},c.name+' ／ 命令 '+(global.TenkaOrders?.remaining(state,c.id)??state.actionPoints)+' / 3')))),h('label',{className:'tenka-field'},h('span',null,'捕虜の処遇を命じる担当'),h('select',{'aria-label':'捕虜の処遇の担当武将',value:delegate?.id||'',disabled:!candidates.length,onChange:e=>setOfficer(e.target.value)},candidates.length?candidates.map(o=>h('option',{value:o.id,key:o.id},o.name+(o.administrative?' ／ 解放を代行':''))):h('option',{value:''},postVictory?'成人武将がいません':'未任務の成人武将がいません'))),h('small',null,(postVictory?'天下統一後の処遇は命令を消費しません。':'各処遇は選択した城の命令1。')+'召し抱えは金 '+format(systems.ACTIONS.enlist.gold)+' 貫。奉行衆は解放を代行します。')),
    model.rows.length?h('div',{className:'tenka-aftermath-list'},model.rows.map(row=>h('article',{className:'tenka-aftermath-person '+row.outcome,key:row.officerId},
     row.officer&&h(Portrait,{officer:row.officer,year:battle.year||state.year,size:52}),
     h('div',{className:'tenka-aftermath-person-body'},h('div',{className:'tenka-aftermath-person-title'},h('strong',null,row.name),h('span',{className:'tenka-side-tag'},row.own?'味方':'敵'),h('span',{className:'tenka-fate-tag'},row.label)),row.current&&h('small',null,'現在：'+row.current),row.decision?.message&&h('p',{className:'tenka-aftermath-decision'},row.decision.message),
@@ -240,9 +245,10 @@ function Tactics({battle,onBattle,selectedUnitId,onSelectedUnitChange,deployment
  return h('section',{className:'tenka-tactical-doctrine'+(deploying?' tenka-deployment':''),'aria-label':deploying?'部隊と陣・柵の自由配置':'部隊の陣形と伏兵'},
   deploying&&h(React.Fragment,null,
    h('div',{className:'tenka-deployment-heading'},h('strong',null,'プレイヤーの布陣'),h('small',null,(side==='defender'?'籠城戦':battle.mode==='siege'?'攻城戦':'野戦')+' ／ 開戦前に自由配置')),
+   (battle.layout?.landscape?.profile?.label||battle.armyDeployment)&&h('p',{className:'tenka-army-deployment'},battle.layout?.landscape?.profile?.label&&h('span',null,'戦場：'+battle.layout.landscape.profile.label),battle.armyDeployment?.[side]&&h('span',null,'自軍の初期陣：'+battle.armyDeployment[side].name),battle.armyDeployment?.[side==='attacker'?'defender':'attacker']&&h('span',null,'敵軍の布陣：'+battle.armyDeployment[side==='attacker'?'defender':'attacker'].name)),
    h('div',{className:'tenka-placement-tools',role:'group','aria-label':'戦場に配置するもの'},[['unit','部隊'],['camp','本陣'],['palisade','木柵']].map(([id,name])=>h('button',{type:'button',key:id,'aria-pressed':tool===id,onClick:()=>selectTool(id)},name))),
    h('p',{className:'tenka-placement-help'},tool==='unit'?'① 部隊を選ぶ → ② 地形を見て地面をクリック／ドラッグ、または座標を入力 → ③ 陣形と陣・柵を整える。':selected?'選択した'+(selected.kind==='camp'?'本陣':'木柵')+'を地面のクリック／タップで移設。向き・座標も変更できます。':'戦場の地面をクリック／タップして'+(tool==='camp'?'本陣':'木柵')+'を設置。既設の陣・柵は選択して移設・撤去できます。'),
-   h('div',{className:'tenka-placement-budget','aria-label':'設営できる数'},budget&&h('span',null,'本陣 '+budget.camp.used+' / '+budget.camp.limit+'　木柵 '+budget.palisade.used+' / '+budget.palisade.limit),h('small',null,'配置範囲　東西 '+zone.xMin+'～'+zone.xMax+' ／ 南北 '+zone.zMin+'～'+zone.zMax)),
+   h('div',{className:'tenka-placement-budget','aria-label':'設営できる数'},budget&&h('span',null,'本陣 '+budget.camp.used+' / '+budget.camp.limit+'　木柵 '+budget.palisade.used+' / '+budget.palisade.limit),h('small',null,'配置範囲　東西 '+Math.ceil(zone.xMin)+'～'+Math.floor(zone.xMax)+' ／ 南北 '+Math.ceil(zone.zMin)+'～'+Math.floor(zone.zMax))),
    tool==='unit'&&h('div',{className:'tenka-player-deployment'},
     h('div',{className:'tenka-deployment-progress'},h('strong',null,'配置確認 '+checkedCount+' / '+units.length+' 部隊'),h('small',null,checkedCount===units.length&&units.length>0?'全隊の位置を確認しました。陣形と本陣・木柵を整えたら戦闘開始へ。':checkedCount>0?'未確認の部隊は初期案の位置にいます。全隊の配置を見渡して開戦してください。':'現在の配置は初期案です。確認していない部隊も、その位置で開戦できます。')),
     h('label',{className:'tenka-deployment-unit-picker'},h('span',null,'配置する部隊'),h('select',{'aria-label':'配置する部隊',value:unit?.id||'',onChange:e=>selectUnit(e.target.value)},h('option',{value:'',disabled:true},'部隊を選んで布陣を決める'),units.map((entry,index)=>h('option',{key:entry.id,value:entry.id},'第'+(index+1)+'部隊 ／ '+(entry.commanderName||'組頭')+' · '+(unitNames[entry.type]||'部隊')+' '+format(entry.troops)+'人 ／ '+(checkedUnits.has(entry.id)?'配置確認済':'仮配置・未確認'))))),

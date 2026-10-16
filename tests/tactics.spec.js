@@ -17,7 +17,7 @@ assert.ok(render, 'find the application render without replacing game rules');
 script = script.slice(0, render.index) + '})();';
 const context = vm.createContext({ console, setTimeout, clearTimeout, performance, URL });
 context.window = context;
-for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-battlefield.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-ui.js']) {
+for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-battlefield.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-orders.js', 'tenka-ui.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, filename), 'utf8'), context, { filename });
 }
 vm.runInContext(script, context, { filename: 'index.inline.js' });
@@ -105,16 +105,16 @@ test('siege troops cross both breached Inabayama gates and capture the inner bai
   assert.ok(castle(settled.state, 'inabayama').troops > 0);
 });
 
-for (const force of ['mixed', 'firearms']) {
+for (const force of ['mixed-legacy', 'mixed', 'firearms']) {
   test(`Nanao's overlapping baileys remain traversable after breaching all three gates (${force})`, () => {
     const state = Game.newGame();
     state.playerClan = 'jinbo';
-    garrison(state, 'toyama', force === 'mixed'
+    garrison(state, 'toyama', force !== 'firearms'
       ? { ashigaru: 5000, archer: 2000, cavalry: 1000, firearm: 4000, navy: 0 }
       : { ashigaru: 0, archer: 0, cavalry: 0, firearm: 12000, navy: 0 });
     garrison(state, 'nanao', { ashigaru: 250, archer: 100, cavalry: 0, firearm: 50, navy: 0 });
     const snapshot = clone(state);
-    const battle = Game.startBattle(Game.createBattle({ state, sourceId: 'toyama', targetId: 'nanao', mode: 'siege' }));
+    const battle = Game.startBattle(Game.createBattle({ state, sourceId: 'toyama', targetId: 'nanao', mode: 'siege', battlefieldVersion: force === 'mixed-legacy' ? 1 : undefined }));
     let contestedHonmaru = false, defeatedBeforeOccupation = false, steps = 0;
     const occupied = () => battle.units.some(unit => unit.side === 'attacker' && unit.troops > 0
       && !['routed', 'destroyed', 'retreating'].includes(unit.status)
@@ -141,7 +141,7 @@ for (const force of ['mixed', 'firearms']) {
     assert.equal(gates.length, 3);
     assert.ok(gates.every(gate => gate.hp === 0));
     assert.ok(occupied());
-    if (force === 'mixed') assert.ok(contestedHonmaru, 'exercise a living garrison contesting the main bailey');
+    if (force === 'mixed-legacy') assert.ok(contestedHonmaru, 'exercise a living garrison contesting the main bailey in the saved legacy deployment');
     else assert.ok(defeatedBeforeOccupation, 'exercise an annihilated garrison before the attackers enter the main bailey');
     assert.ok(Tactics.verify(state, battle), 'the repaired path reproduces exactly through the production command ledger');
     const altered = clone(battle); altered.units[0].x++;
@@ -297,7 +297,7 @@ test('palisades physically stop and absorb enemy attacks, camps protect and rall
   let battle = Game.createBattle({ state, sourceId: 'kiyosu', targetId: 'inabayama', mode: 'field' });
   let response = Tactics.placeFortification(battle, { kind: 'palisade', x: 0, z: 20, rotation: 0 });
   assert.equal(response.ok, true); battle = response.battle;
-  response = Tactics.placeFortification(battle, { kind: 'camp', x: 0, z: 34, rotation: 0 });
+  response = Tactics.placeFortification(battle, { kind: 'camp', x: 0, z: 50, rotation: 0 });
   assert.equal(response.ok, true); battle = Game.startBattle(response.battle);
   const attacker = battle.units.find(unit => unit.side === 'attacker' && unit.type === 'ashigaru');
   const defender = battle.units.find(unit => unit.side === 'defender' && unit.type === 'ashigaru');
@@ -318,8 +318,8 @@ test('palisades physically stop and absorb enemy attacks, camps protect and rall
   assert.ok(protectedDamage < exposedDamage, 'a fence on the line of attack protects its own soldiers');
   hooks.move(battle, defender, 0, 24);
   assert.ok(defender.z > 18.8, 'destroyed stakes no longer block the enemy');
-  Object.assign(attacker, { x: 0, z: 31 });
-  Object.assign(defender, { x: 0, z: 29, order: 'hold' });
+  Object.assign(attacker, { x: 0, z: 47 });
+  Object.assign(defender, { x: 0, z: 45, order: 'hold' });
   const camp = battle.fortifications.find(item => item.kind === 'camp');
   const campDamage = hooks.damage(battle, defender, attacker, false);
   camp.hp = 0;

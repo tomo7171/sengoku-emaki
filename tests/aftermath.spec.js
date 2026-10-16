@@ -274,10 +274,15 @@ test('final victory permits all prisoner treatments with zero commands and a bus
   for (const type of ['release', 'enlist', 'execute']) {
     const input = clone(state);
     input.gameOver = true; input.winner = input.playerClan; input.actionPoints = 0;
+    for (const castle of input.castles.filter(item => item.clan === input.playerClan)) {
+      input.tenka.castleOrders.castles[castle.id].remaining = 0;
+    }
+    const commandsBefore = clone(input.tenka.castleOrders);
     input.tenka.assignments.shibata_katsuie = { turn: input.turn, type: 'reclaim' };
     const result = Systems.act(input, { type, officerId: 'shibata_katsuie', targetOfficerId: 'okabe_motonobu' });
     assert.equal(result.ok, true, type + ': ' + result.message);
     assert.equal(result.state.actionPoints, 0, 'post-victory treatment cannot consume a nonexistent command');
+    assert.deepEqual(clone(result.state.tenka.castleOrders), commandsBefore, 'free post-victory treatment leaves every castle command budget unchanged');
     assert.equal(result.state.tenka.prisonerDecisions[0].type, type);
     const defeated = clone(input); defeated.winner = 'imagawa';
     const rejected = Systems.act(defeated, { type, officerId: 'shibata_katsuie', targetOfficerId: 'okabe_motonobu' });

@@ -31,10 +31,14 @@ test('a house with no adult retainers can govern, recruit for free, save and ass
  const {Game,Systems,Dynasty}=runtime();let state=Game.newGame();
  for(const o of state.officers.filter(o=>o.clan===state.playerClan)){o.status='dead';o.castleId=null;o.capturedBy=null;clearCommands(state,o.id);}
  state=Game.migrate(state);state.gold=0;state.actionPoints=0;
+ for(const castle of state.castles.filter(item=>item.clan===state.playerClan))state.tenka.castleOrders.castles[castle.id].remaining=0;
+ const commandsBefore=clone(state.tenka.castleOrders);
  const fallback=Systems.getView(state).administrationFallback;assert.equal(fallback.reason,'no-officers');
  const candidate=Dynasty.getView(state).recruits[0];assert.ok(candidate);
  const hired=Dynasty.act(state,{type:'recruit',candidateId:candidate.id});assert.equal(hired.ok,true,hired.message);state=persist(Game,hired.state);
  const recruit=state.officers.find(o=>o.id===candidate.id);assert.equal(recruit.status,'active');assert.equal(state.gold,0);assert.equal(state.actionPoints,0);
+ assert.deepEqual(clone(hired.state.tenka.castleOrders),commandsBefore,'emergency recruitment cannot consume or refill any castle command');
+ assert.deepEqual(clone(state.tenka.castleOrders),commandsBefore,'saving and resuming preserve all exhausted castle budgets');
  const army=clone(state.armies.kiyosu);army.commanderId=recruit.id;
  const arranged=Game.arrange(state,'kiyosu',army);assert.equal(arranged.ok,true,arranged.message);persist(Game,arranged.state);
  assert.equal(arranged.state.officers.find(o=>o.id==='oda_nobunaga').status,'dead');
