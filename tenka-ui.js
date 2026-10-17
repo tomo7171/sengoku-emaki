@@ -36,6 +36,99 @@ function battleAftermathView(state,battle=state.lastBattle){
 function create(React){
 const h=React.createElement;
 function Portrait({officer,size=48,year}){return h('img',{className:'tenka-portrait',src:global.TenkaPortraits?.uri(officer,year==null?undefined:{year}),width:size,height:size,alt:officer.name+'の創作肖像',loading:'lazy'});}
+function RetainerStations({state,onState,onNotify}){
+ const [destinations,setDestinations]=React.useState({});
+ const [feedback,setFeedback]=React.useState(null);
+ const retainers=global.TenkaRetainers;
+ if(!retainers)return null;
+ const view=retainers.getView(state),castles=view.castles||[];
+ const station=(officer,castleId)=>{
+  const result=retainers.act(state,{type:'station',officerId:officer.id,castleId});
+  setFeedback({ok:result.ok,text:result.message});
+  if(result.ok){onState(result.state);setDestinations(previous=>({...previous,[officer.id]:''}));}
+  onNotify?.({text:result.message,success:result.ok});
+ };
+ return h('section',{className:'tenka-retainer-stations','aria-label':'武将の城への配置'},
+  h('div',{className:'tenka-section-heading'},h('h4',null,'武将の城への配置'),h('span',null,'成人の家臣 '+(view.officers||[]).length+' 人')),
+  h('p',{className:'tenka-note'},'配置先の城を選び、武将ごとに「配置する」で指示します。移動元の城の命令を'+(view.cost??1)+'回消費します。城の大将は別に任命できます。'),
+  view.blocked&&h('p',{className:'tenka-feedback failure',role:'status'},view.message||'先に合戦・援軍要請への対応を決めてください。'),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text),
+  (view.officers||[]).length?h('div',{className:'tenka-station-list'},view.officers.map(officer=>{
+   const destination=castles.find(c=>c.id===destinations[officer.id]);
+   const currentId=officer.castleId;
+   const disabled=!!view.blocked||officer.available===false||!!officer.busy||!destination||destination.id===currentId||(officer.remaining??3)<(view.cost??1);
+   return h('article',{className:'tenka-station-person',key:officer.id,'data-officer-id':officer.id},
+    h('div',{className:'tenka-station-identity'},h(Portrait,{officer,year:state.year,size:48}),h('div',null,h('strong',null,officer.name),h('small',null,'現在の城：'+(officer.castleName||'配置なし')),h('small',null,(officer.sourceCastleName||officer.castleName||'命令元の城')+' ／ 命令 '+(officer.remaining??0)+' / 3'))),
+    h('div',{className:'tenka-station-command'},h('label',{className:'tenka-field'},h('span',null,'配置先の城'),h('select',{'aria-label':officer.name+'の配置先の城',value:destination?.id||'',disabled:!!view.blocked||officer.available===false||!!officer.busy,onChange:e=>setDestinations(previous=>({...previous,[officer.id]:e.target.value}))},h('option',{value:''},'配置先を選ぶ'),castles.map(c=>h('option',{key:c.id,value:c.id,disabled:c.id===currentId},c.name+' ／ '+(c.province||'自領')+(c.id===currentId?'（現在の城）':''))))),h('button',{type:'button','aria-label':officer.name+'を城に配置',disabled,onClick:()=>station(officer,destination?.id)},'配置する')),
+    officer.reason&&h('small',{className:'tenka-station-reason'},officer.reason));
+  })):h('p',{className:'tenka-note'},'配置できる成人の家臣がいません。登用・元服で家臣団を整えましょう。'));
+}
+function AidRequests({state,onState,onNotify,compact=false,showHistory=true}){
+ const [sources,setSources]=React.useState({});
+ const [counts,setCounts]=React.useState({});
+ const [feedback,setFeedback]=React.useState(null);
+ const allies=global.TenkaAllies;
+ if(!allies)return null;
+ const view=allies.getView(state),requests=view.requests||[],reports=view.reports||[];
+ const decide=(type,request)=>{
+  const result=allies.act(state,{type,requestId:request.id,sourceId:sources[request.id],troops:Number(counts[request.id])});
+  setFeedback({ok:result.ok,text:result.message});
+  if(result.ok)onState(result.state);
+  onNotify?.({text:result.message,success:result.ok});
+ };
+ return h('section',{className:'tenka-aid-requests'+(compact?' compact':''),'aria-label':'同盟国の援軍要請'},
+  h('div',{className:'tenka-section-heading'},h('h4',null,'同盟国の援軍要請'),h('span',null,requests.length?'未回答 '+requests.length+' 件':'未回答の要請なし')),
+  h('p',{className:'tenka-note'},'同盟国の攻勢・防衛に援軍を出すか、断るかを決めてください。出兵元の城と人数はプレイヤーが指定します。拒否すると、その同盟国との友好度が'+(view.declineRelationLoss??15)+'下がります。'),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text),
+  requests.length?h('div',{className:'tenka-aid-list'},requests.map(request=>{
+   const source=(request.sources||[]).find(c=>c.id===sources[request.id]);
+   const rawCount=counts[request.id]??'',troops=Number(rawCount),validCount=rawCount!==''&&Number.isInteger(troops)&&troops>0;
+   const estimate=source&&validCount?allies.preview?.(state,{requestId:request.id,sourceId:source.id,troops}):null;
+   const disabled=!source||!validCount||troops>source.maxTroops||request.canSend===false||estimate?.ok===false||!!source.reason;
+   return h('article',{className:'tenka-aid-request',key:request.id,'data-aid-request-id':request.id},
+    h('header',null,h('span',{className:'tenka-aid-side'},request.side==='attacker'?'同盟国の攻勢':'同盟国の防衛'),h('h5',null,request.allyName+'から援軍の要請'),h('p',null,request.sourceName+' → '+request.targetName+' ／ 敵：'+request.opponentName)),
+    h('p',{className:'tenka-aid-summary'},(request.mode==='siege'?'攻城・籠城戦':'野戦')+' ／ 要請兵力 '+format(request.requestedTroops)+' 人',h('small',null,'要請人数にかかわらず、派遣する人数を指定できます。')),
+    h('div',{className:'tenka-aid-controls'},h('label',{className:'tenka-field'},h('span',null,'出兵元の城'),h('select',{'aria-label':request.allyName+'への援軍の出兵元',value:source?.id||'',onChange:e=>setSources(previous=>({...previous,[request.id]:e.target.value}))},h('option',{value:''},'城を選ぶ'),(request.sources||[]).map(c=>h('option',{key:c.id,value:c.id,disabled:!c.maxTroops||!!c.reason},c.name+' ／ 派兵上限 '+format(c.maxTroops)+' 人'+(c.reason?' ／ '+c.reason:''))))),h('label',{className:'tenka-field'},h('span',null,'派遣する人数'),h('input',{type:'number',inputMode:'numeric',min:1,max:source?.maxTroops,step:1,'aria-label':request.allyName+'への援軍の人数',value:rawCount,onChange:e=>setCounts(previous=>({...previous,[request.id]:e.target.value}))}))),
+    source&&h('div',{className:'tenka-aid-resources'},h('span',null,'城の兵力 '+format(source.troops)+' 人 ／ 守備に残す最低兵力 '+format(source.minimumGarrison)+' 人'),h('span',null,'派兵上限 '+format(source.maxTroops)+' 人'+(estimate?.remainingGarrison!=null?' ／ 派兵後の守備兵 '+format(estimate.remainingGarrison)+' 人':'')),h('span',null,source.commanderName?'指揮：'+source.commanderName:'指揮武将を確認してください'),estimate?.foodCost!=null&&h('span',null,'兵糧 '+format(estimate.foodCost)+' 石 ／ 金 '+format(estimate.goldCost)+' 貫 ／ '+source.name+'の命令 '+(estimate.orderCost??1)),h('small',null,'自家の蓄え：兵糧 '+format(state.food)+' 石 ／ 金 '+format(state.gold)+' 貫')),
+    estimate?.message&&estimate.ok===false&&h('p',{className:'tenka-feedback failure',role:'status'},estimate.message),
+    h('div',{className:'tenka-aid-actions'},h('button',{type:'button',className:'tenka-aid-send',disabled,onClick:()=>decide('send',request)},'援軍を送る'),h('button',{type:'button',className:'tenka-aid-decline',onClick:()=>decide('decline',request)},'援軍を断る')),
+    h('small',{className:'tenka-aid-warning'},request.active===false?'失効した要請を終了しても、友好度は下がりません。':'断った場合：'+request.allyName+'との友好度 −'+(view.declineRelationLoss??15)+'。回答するまで次の季節には進みません。'));
+  })):h('p',{className:'tenka-aid-empty'},'現在、同盟国からの援軍要請はありません。'),
+  showHistory&&reports.length>0&&h('details',{className:'tenka-aid-history'},h('summary',null,'援軍の回答・戦果の記録（'+reports.length+'件）'),h('div',null,reports.slice().reverse().map(report=>h('article',{key:report.id},h('strong',null,(report.date||((report.year||state.year)+'年'))+' ／ '+report.allyName),h('p',null,report.message||((report.decision==='received'?'同盟軍が参戦':report.decision==='send'?'自軍を援軍として派遣':'援軍を拒否')+' ／ '+(report.sourceName||'')+' → '+(report.targetName||''))),['send','received'].includes(report.decision)&&h('small',null,(report.decision==='received'?'同盟援軍 ':'派遣 ')+format(report.troops)+' 人 ／ 損失 '+format(report.casualties)+' 人 ／ 帰還 '+format(report.survivors)+' 人'),h('small',null,'友好度 '+((report.relationChange||0)>0?'+':'')+(report.relationChange||0)))))));
+}
+function AidRequestForm({state,onState,onNotify,war,compact=false}){
+ const [contextId,setContext]=React.useState('');
+ const [castleId,setCastle]=React.useState('');
+ const [count,setCount]=React.useState('');
+ const [feedback,setFeedback]=React.useState(null);
+ const allies=global.TenkaAllies;
+ if(!allies?.getSupportView)return null;
+ const initial=allies.getSupportView(state,war||{}),contexts=initial.contexts||[];
+ const context=war?.sourceId?war:contexts.find(entry=>(entry.id||entry.sourceId+'-'+entry.targetId+'-'+entry.mode)===contextId)||null;
+ const view=context?allies.getSupportView(state,context):initial;
+ const committed=(state.tenka?.allies?.committed||view.supports||[]);
+ const source=context?(view.sources||[]).find(entry=>entry.id===castleId):null;
+ const troops=Number(count),validCount=count!==''&&Number.isSafeInteger(troops)&&troops>0;
+ const action={...context,supportCastleId:source?.id,troops};
+ const estimate=context&&source&&validCount?allies.previewSupport(state,action):null;
+ const disabled=!context||!source||!validCount||troops>source.maxTroops||view.ok===false||estimate?.ok!==true||!!source.reason;
+ const report=result=>{setFeedback({ok:result.ok,text:result.message});if(result.ok){onState(result.state);setCastle('');setCount('');}onNotify?.({text:result.message,success:result.ok});};
+ const contextName=entry=>((entry.defending?'自家の防衛':'自家の攻勢')+' ／ '+(entry.sourceName||state.castles.find(c=>c.id===entry.sourceId)?.name||'出陣元')+' → '+(entry.targetName||state.castles.find(c=>c.id===entry.targetId)?.name||'戦場')+' ／ '+(entry.mode==='field'?'野戦':'攻城・籠城戦'));
+ return h('section',{className:'tenka-aid-requests tenka-request-support'+(compact?' compact':''),'aria-label':'同盟国へ援軍を要請'},
+  h('div',{className:'tenka-section-heading'},h('h4',null,'同盟国へ援軍を要請'),h('span',null,'自家の侵攻・防衛への支援')),
+  h('p',{className:'tenka-note'},'援軍を頼む戦場、同盟国の城、人数を指定してください。要請した兵は同盟国の城から出兵し、自家の部隊とともに戦います。要請時の費用は同盟国側が負担し、取り消しても戻りません。'),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text),
+  !war?.sourceId&&h('label',{className:'tenka-field'},h('span',null,'援軍を要請する戦場'),h('select',{'aria-label':'援軍を要請する戦場',value:context?context.id||context.sourceId+'-'+context.targetId+'-'+context.mode:'',disabled:!contexts.length,onChange:e=>{setContext(e.target.value);setCastle('');setCount('');setFeedback(null);}},h('option',{value:''},contexts.length?'戦場を選ぶ':'要請できる侵攻・防衛はありません'),contexts.map(entry=>h('option',{key:entry.id||entry.sourceId+'-'+entry.targetId+'-'+entry.mode,value:entry.id||entry.sourceId+'-'+entry.targetId+'-'+entry.mode},contextName(entry))))),
+  context&&h('article',{className:'tenka-aid-request'},h('p',{className:'tenka-aid-summary'},contextName(context)),
+   h('div',{className:'tenka-aid-controls'},h('label',{className:'tenka-field'},h('span',null,'援軍を頼む同盟国の城'),h('select',{'aria-label':'援軍を頼む同盟国の城',value:source?.id||'',onChange:e=>setCastle(e.target.value)},h('option',{value:''},'同盟国の城を選ぶ'),(view.sources||[]).map(entry=>h('option',{key:entry.id,value:entry.id,disabled:!entry.maxTroops||!!entry.reason},entry.allyName+' ／ '+(entry.sourceName||entry.name)+' ／ 上限 '+format(entry.maxTroops)+' 人'+(entry.reason?' ／ '+entry.reason:''))))),h('label',{className:'tenka-field'},h('span',null,'要請する人数'),h('input',{type:'number',inputMode:'numeric',min:1,max:source?.maxTroops,step:1,'aria-label':'同盟国に要請する援軍の人数',value:count,onChange:e=>setCount(e.target.value)}))),
+   source&&h('div',{className:'tenka-aid-resources'},h('span',null,'同盟国の城の兵力 '+format(source.troops)+' 人 ／ 守備に残す最低兵力 '+format(source.minimumGarrison)+' 人'),h('span',null,'援軍の上限 '+format(source.maxTroops)+' 人'+(estimate?.remainingGarrison!=null?' ／ 出兵後の守備兵 '+format(estimate.remainingGarrison)+' 人':'')),estimate?.foodCost!=null&&h('span',null,'同盟国側の負担：兵糧 '+format(estimate.foodCost)+' 石 ／ 金 '+format(estimate.goldCost)+' 貫'),h('small',null,'自家の兵・兵糧・命令は、援軍要請では消費しません。')),
+   estimate?.ok===false&&estimate.message&&h('p',{className:'tenka-feedback failure',role:'status'},estimate.message),
+   view.ok===false&&view.message&&h('p',{className:'tenka-feedback failure',role:'status'},view.message),
+   !(view.sources||[]).length&&h('p',{className:'tenka-aid-empty'},'援軍を要請できる有効な同盟国の城がありません。外交交渉で同盟を結んでください。'),
+   h('div',{className:'tenka-aid-actions'},h('button',{type:'button',className:'tenka-aid-send',disabled,onClick:()=>report(allies.requestSupport(state,action))},'この人数で援軍を要請する'))),
+  committed.length>0&&h('div',{className:'tenka-aid-committed'},h('h5',null,'参戦予定の同盟軍'),committed.map(support=>h('article',{key:support.id},h('strong',null,(support.allyName||support.clanName||state.castles.find(c=>c.clan===support.allyClan)?.clanName||'同盟軍')+' ／ '+(support.sourceName||state.castles.find(c=>c.id===support.sourceId)?.name||'同盟国の城')+' '+format(support.troops)+' 人'),h('small',null,'戦場：'+(state.castles.find(c=>c.id===support.targetId)?.name||support.targetId)+' ／ '+(support.defending?'自家の防衛':'自家の攻勢')+' ／ '+(support.mode==='field'?'野戦':'攻城・籠城戦')),h('small',null,Object.entries(support.units||{}).filter(([,number])=>number>0).map(([type,number])=>(unitNames[type]||type)+' '+format(number)+'人').join(' ／ ')),h('button',{type:'button','aria-label':(support.sourceName||'同盟軍')+'の援軍要請を取り消す',onClick:()=>report(allies.cancelSupport(state,{supportId:support.id}))},'援軍要請を取り消す')))),
+  !context&&!contexts.length&&h('p',{className:'tenka-aid-empty'},initial.message||'隣接する戦場と有効な同盟がある場合に援軍を要請できます。'));
+}
 function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
  const systems=global.TenkaSystems;
  const [tab,setTab]=React.useState('政務');
@@ -121,6 +214,8 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    h('div',{className:'tenka-metrics'},metric('石高',format(castle.kokudaka)+' 石','秋の収穫を支える生産力'),metric('動員枠',format(systems.mobilizationLimit(castle))+' 人','現兵力 '+format(castle.troops)+' 人'),metric('商業',format(economy.commerce)+'','季節収入 +'+format(economy.income)+' 貫'),metric('人口',format(castle.population)+' 人','開墾と商いを担う領民'),metric('士気',castle.morale+' / 100','兵糧の不足・敗戦で低下')),
    h('div',{className:'tenka-action-grid'},actions('reclaim','田畑の開墾','新田を開き石高を増加。担当武将の政治力が成果を左右します。'),actions('commercial','商いの振興','街道・城下の商業を育て、季節ごとの銭収入を増やします。'),actions('levy','兵の動員','石高・人口・地形に応じた上限まで徴募。兵には継続して兵糧が必要です。')),
    h('p',{className:'tenka-note'},'戦争は領国の余力で支えます。開墾と商業への投資を先に行い、守備兵と兵糧を残して出陣しましょう。')),
+  tab==='外交'&&h(AidRequests,{state,onState,onNotify}),
+  tab==='外交'&&h(AidRequestForm,{state,onState,onNotify}),
   tab==='外交'&&target&&h('section',null,
    h('div',{className:'tenka-metrics'},metric('交渉先',target.clanName,target.name),metric('外交関係',(state.relations[target.clan]??0)+'',state.alliances.includes(target.clan)?'盟約を締結中':'信頼を重ねて盟約へ'),metric('相手の兵力',format(target.troops)+' 人','消耗した勢力には交渉の余地も生まれます')),
    h('div',{className:'tenka-action-grid'},actions('negotiation','使者と贈答','家臣を使者に送り関係を改善。十分な信頼を得れば期限付きの盟約を結びます。')),
@@ -130,6 +225,7 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    h('div',{className:'tenka-action-grid'},actions('infiltrate','内応の密約','知略に長けた家臣を送り、敵将の忠誠を揺さぶります。疲弊した守備と低い忠誠は離反の機会になります。')),
    h('p',{className:'tenka-note'},'結果は担当武将の知略・対象の忠誠・領国の疲弊に左右されます。戦場で兵を減らすだけでなく、家臣の結束も守りましょう。')),
   tab==='家臣'&&h('section',null,
+   h(RetainerStations,{state,onState,onNotify}),
    h('div',{className:'tenka-section-heading'},h('h4',null,'新たな家臣の登用'),h('span',null,'候補 '+recruits.length+' 人 ／ 今季あと '+Math.max(0,2-(recruitmentRecord?.turn===state.turn?recruitmentRecord.count||0:0))+' 人を登用できます')),
    h('p',{className:'tenka-note'},'各地の在地人材と仕官を求める浪人を登用します。史実の人物は生年に応じて誕生・元服し、この年代記で生まれる子や在地人材は創作の人物として区別します。成人武将が一人もいない場合、最初の登用は金・命令を消費しません。'),
    recruits.length?h('div',{className:'tenka-recruit-list'},h('table',{className:'tenka-recruit-table','aria-label':'登用候補の一覧'},h('caption',null,'在地人材8人と仕官を求める浪人を比較できます。登用済みの候補は一覧から除かれます。'),h('thead',null,h('tr',null,['武将','出自・年齢','統率','武勇','知略','政治','費用','登用'].map(label=>h('th',{key:label,scope:'col'},label)))),h('tbody',null,recruits.map(o=>h('tr',{key:o.id,'data-candidate-id':o.id},h('th',{scope:'row','data-label':'武将'},h('div',{className:'tenka-recruit-person'},h(Portrait,{officer:o,year:state.year,size:48}),h('strong',null,o.name))),h('td',{'data-label':'出自・年齢'},h('span',null,(o.originPlace||'浪人')+' ／ '+ageLabel(o)),h('small',null,originLabel(o))),...['leadership','valor','intelligence','politics'].map((stat,i)=>h('td',{key:stat,'data-label':['統率','武勇','知略','政治'][i],className:'tenka-recruit-stat'},o[stat])),h('td',{'data-label':'費用'},format(o.cost??150)+' 貫',h('small',null,o.commandCost===0?'命令不要':'命令1')),h('td',{'data-label':'登用'},recruitButton(o))))))):h('p',{className:'tenka-note'},'今季の仕官希望者はいません。次の季節に新たな在地人材を探せます。'),
@@ -266,7 +362,7 @@ function Tactics({battle,onBattle,selectedUnitId,onSelectedUnitChange,deployment
   battle.supply&&h('small',{className:'tenka-supply-note'},'自軍の兵糧：'+format(Math.max(0,battle.supply[side].initial-battle.supply[side].consumed))+' 石 ／ 合戦中の消費 '+format(battle.supply[side].consumed)+' 石'));
 }
 
-return {Council,Tactics,Portrait,BattleAftermath};
+return {Council,Tactics,Portrait,BattleAftermath,RetainerStations,AidRequests,AidRequestForm};
 }
 global.TenkaUI={create,era,battleAftermathView};
 })(typeof window==='undefined'?globalThis:window);

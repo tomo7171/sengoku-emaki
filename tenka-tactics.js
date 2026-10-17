@@ -250,6 +250,35 @@
     battle.events = battle.events.slice(-40);
   }
   function reject(battle, message) { return { battle, ok: false, message }; }
+  function unitCounts(units, side, field = "maxTroops") {
+    return Object.fromEntries(TYPES.map((type) => [type, units.filter((unit) => unit.side === side && unit.type === type).reduce((total, unit) => total + unit[field], 0)]));
+  }
+  function addAlliedSupport(battle, state, defending = false) {
+    const supports = root.TenkaAllies?.getSupports?.(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, defending }) || [];
+    if (state.tenka?.allies?.committed?.length && !supports.length) throw Error("手配した同盟援軍の合戦を開始するか、要請を取り消してください。");
+    if (!supports.length) return battle;
+    const side = defending ? "defender" : "attacker", ranges = { ashigaru: 2.5, archer: 18, cavalry: 3.5, firearm: 22, navy: 24 };
+    battle.supportVersion = 1;
+    battle.supportCommitments = copy(supports);
+    for (const support of supports) {
+      const name = support.clanName || support.name || state.clans?.find?.((clan) => clan.id === support.clan)?.name || support.sourceName || "同盟軍";
+      const morale = clamp(support.morale ?? 75, 0, 100);
+      for (const type of TYPES) for (let remaining = support.units[type] || 0, index = 0; remaining > 0; index++) {
+        const troops = Math.min(600, remaining); remaining -= troops;
+        battle.units.push({
+          id: `support-${support.id}-${type}-${index}`, side, type, commanderId: null, commanderName: `${name}援軍`,
+          x: 0, z: defending ? -25 : 34, targetX: 0, targetZ: defending ? -25 : 34,
+          troops, maxTroops: troops, morale, initialMorale: morale, order: defending ? "hold" : "attack", targetId: null,
+          status: "ready", range: ranges[type], cooldown: 0, damageRemainder: 0, receivedRemainder: 0,
+          facingX: 0, facingZ: defending ? 1 : -1, pathIndex: 1,
+          supportId: support.id, supportClan: support.clan, supportCastleId: support.sourceId, supportName: name, supportColor: support.color,
+          foreignSupport: true,
+        });
+      }
+      event(battle, `${name}の援軍 ${sum(support.units).toLocaleString("ja-JP")}人が${defending ? "守備軍" : "攻撃軍"}へ合流しました。`);
+    }
+    return battle;
+  }
   function prepare(battle, options = {}) {
     battle.playerSide = options.defending ? "defender" : battle.playerSide || "attacker";
     battle.defending = battle.playerSide === "defender";
@@ -272,8 +301,8 @@
       if (battle.defending && unit.side === "attacker") unit.order = "attack";
     }
     if (battle.defending) {
-      battle.availableTroops = battle.units.filter((unit) => unit.side === "defender").reduce((total, unit) => total + unit.maxTroops, 0);
-      battle.availableUnits = Object.fromEntries(TYPES.map((type) => [type, battle.units.filter((unit) => unit.side === "defender" && unit.type === type).reduce((total, unit) => total + unit.maxTroops, 0)]));
+      battle.availableTroops = battle.units.filter((unit) => unit.side === "defender" && !unit.foreignSupport).reduce((total, unit) => total + unit.maxTroops, 0);
+      battle.availableUnits = unitCounts(battle.units.filter((unit) => !unit.foreignSupport), "defender");
       battle.friendlyOfficers = copy(battle.defenderOfficers);
     } else battle.friendlyOfficers = copy(battle.eligibleOfficers);
     if (options.battlefieldVersion !== 0) root.TenkaBattlefield?.apply(battle, options.battlefieldVersion ?? root.TenkaBattlefield.version);
@@ -282,6 +311,7 @@
   }
   function create(options) {
     const battle = original.create(options);
+    addAlliedSupport(battle, options.state);
     return prepare(battle, { attackerFood: Math.max(0, options.state.food - 600), defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
   }
   function createDefense(state, threat = state.pendingDefense, options = {}) {
@@ -299,6 +329,7 @@
     const battle = original.create({ state: enemyState, sourceId: source.id, targetId: target.id, mode: threat.mode || "siege" });
     battle.stateStamp = stamp(state);
     battle.id = `tactical-defense-${battle.stateStamp}-${source.id}-${target.id}-${battle.mode}`;
+    addAlliedSupport(battle, state, true);
     return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: state.food, battlefieldVersion: options.battlefieldVersion });
   }
   function deploy(battle, command = {}) {
@@ -306,6 +337,7 @@
     const side = friendly(battle), unit = battle.units.find((item) => item.id === command.unitId && item.side === side);
     if (!unit) return reject(battle, "自軍の部隊を選んでください。");
     const x = command.x ?? unit.x, z = command.z ?? unit.z, type = command.type ?? unit.type, troops = command.troops ?? unit.troops;
+    if (unit.foreignSupport && (type !== unit.type || troops !== unit.maxTroops || (Object.hasOwn(command, "commanderId") && command.commanderId != null))) return reject(battle, "同盟軍の兵科・兵数・指揮官は変更できません。配置と戦場での命令を指示してください。");
     const zone = deploymentZone(battle, side);
     if (!Number.isFinite(x) || !Number.isFinite(z) || x < zone.xMin || x > zone.xMax || z < zone.zMin || z > zone.zMax) return reject(battle, side === "defender" ? "守備軍は城側（z -5以下）の陸地・曲輪へ配置してください。" : "攻撃軍は手前側（z 10以上）へ配置してください。");
     if (!TYPES.includes(type) || !Number.isInteger(troops) || troops < 0 || troops > 600) return reject(battle, "一部隊は五兵科から選び、兵数は零から六百の整数にしてください。");
@@ -313,15 +345,15 @@
     if (type === "navy" && (!home.coastal || !battle.coastal)) return reject(battle, "水軍は沿岸拠点の海上へ配置してください。");
     if (blocked(battle, x, z, type)) return reject(battle, "堀・川・海・城壁・木柵・町や村の家屋を避け、水軍は海上へ配置してください。");
     if (troops > 0 && (battle.fortifications || []).some((item) => item.kind === "palisade" && fortificationContains(item, x, z, 0.8))) return reject(battle, "木柵の上には配置できません。柵の後ろへ部隊を配置してください。");
-    const others = battle.units.filter((item) => item.side === side && item.id !== unit.id);
-    if (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops) return reject(battle, "出陣できる兵科別の兵数を超えています。");
+    const others = battle.units.filter((item) => item.side === side && item.id !== unit.id && !item.foreignSupport);
+    if (!unit.foreignSupport && (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops)) return reject(battle, "出陣できる兵科別の兵数を超えています。");
     const commanderId = Object.hasOwn(command, "commanderId") ? command.commanderId : unit.commanderId;
     const officers = battle.friendlyOfficers || (side === "defender" ? battle.defenderOfficers : battle.eligibleOfficers);
     const commander = commanderId ? officers.find((officer) => officer.id === commanderId) : null;
     if (commanderId && (!commander || others.some((item) => item.commanderId === commanderId))) return reject(battle, "活動中の自家武将を、一人につき一部隊に配置してください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unit.id);
     const ranges = { ashigaru: 2.5, archer: 18, cavalry: 3.5, firearm: 22, navy: 24 };
-    Object.assign(selected, { x, z, targetX: x, targetZ: z, type, troops, maxTroops: troops, commanderId: commanderId || null, commanderName: commander?.name || "組頭", range: ranges[type] });
+    Object.assign(selected, { x, z, targetX: x, targetZ: z, type, troops, maxTroops: troops, commanderId: commanderId || null, commanderName: unit.foreignSupport ? unit.commanderName : commander?.name || "組頭", range: ranges[type] });
     if (selected.ambush && !canAmbush(result, selected)) { selected.ambush = false; selected.revealed = true; }
     result.ledger.push({ kind: "deploy", command: { unitId: unit.id, x, z, type, troops, commanderId: commanderId || null } });
     return { battle: result, ok: true, message: "部隊の配置を変更しました。" };
@@ -578,7 +610,23 @@
     }
   }
   function result(battle) {
-    const report = original.result(battle);
+    // Allied reserves remain their clan's soldiers. The native settlement uses
+    // these fields to debit home armies and seed a captured castle's garrison;
+    // feed it only each principal army, while combat still uses both forces.
+    const primary = battle.units.filter((unit) => !unit.foreignSupport);
+    const report = original.result(battle.supportVersion ? { ...battle, units: primary,
+      initialAttacker: unitCounts(primary, "attacker"), initialDefender: unitCounts(primary, "defender") } : battle);
+    if (battle.supportVersion) {
+      report.supportReports = (battle.supportCommitments || []).map((support) => {
+        const units = battle.units.filter((unit) => unit.foreignSupport && unit.supportId === support.id);
+        const survivingUnits = unitCounts(units, friendly(battle), "troops"), committedUnits = copy(support.units);
+        const casualtyUnits = Object.fromEntries(TYPES.map((type) => [type, committedUnits[type] - survivingUnits[type]]));
+        return { id: support.id, supportId: support.id, clan: support.clan, sourceId: support.sourceId, source: support.sourceId,
+          sourceName: support.sourceName, clanName: support.clanName || support.name || support.sourceName,
+          committedUnits, units: copy(committedUnits), casualtyUnits, survivingUnits,
+          troops: sum(committedUnits), casualties: sum(casualtyUnits), survivors: sum(survivingUnits) };
+      });
+    }
     report.playerSide = friendly(battle);
     report.defending = !!battle.defending;
     report.playerWon = battle.winner === friendly(battle);
@@ -590,6 +638,7 @@
       report.phases[0].text = "城内の曲輪に守備隊を配置し、籠城を指揮しました。";
       report.phases[2].title = report.playerWon ? "防衛成功" : "落城";
     } else report.message += ` 兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を追加消費。`;
+    if (report.supportReports?.length) report.message += ` 同盟援軍の損失 ${report.supportReports.reduce((total, support) => total + support.casualties, 0).toLocaleString("ja-JP")}人、帰還 ${report.supportReports.reduce((total, support) => total + support.survivors, 0).toLocaleString("ja-JP")}人。`;
     return report;
   }
   function verify(state, battle) {
