@@ -130,6 +130,22 @@ def main():
                 expect(page.locator('.tactical-graphics-error')).to_have_count(0)
                 page.wait_for_function('window.__castleTestEntries?.size>0')
                 assert page.evaluate('!!window.TenkaCastleModels'), 'The detailed 3D castle module is loaded'
+                page.wait_for_function("()=>{const s=window.__castleTestScene;const foliage=s.getObjectByName('layered-japanese-cedar-branches')||s.getObjectByName('spreading-japanese-pine-branches')||s.getObjectByName('five-lobed-broadleaf-crowns');return foliage?.material.map?.userData.atlasReady===true;}")
+                natural_surfaces = page.evaluate("""()=>{
+ const scene=window.__castleTestScene,terrain=scene.getObjectByName('natural-terrain-surface');
+ const foliage=scene.getObjectByName('layered-japanese-cedar-branches')||scene.getObjectByName('spreading-japanese-pine-branches')||scene.getObjectByName('five-lobed-broadleaf-crowns');
+ const bark=scene.getObjectByName('tree-trunks-and-visible-branches');
+ return {sky:scene.background?.name,reflectedSky:scene.environment===scene.background,
+  ground:terrain?.material.map?.name,groundBump:terrain?.material.bumpScale,
+  foliage:foliage?.material.map?.name,bark:bark?.material.map?.name,
+  skyWidth:scene.background?.image?.width,skyHeight:scene.background?.image?.height};
+}""")
+                assert natural_surfaces['sky'] == 'tenka-natural-sky' and natural_surfaces['reflectedSky'], natural_surfaces
+                assert natural_surfaces['skyWidth'] == natural_surfaces['skyHeight'] * 2, natural_surfaces
+                assert natural_surfaces['ground'] == 'tenka-natural-ground' and natural_surfaces['groundBump'] > 0, natural_surfaces
+                assert natural_surfaces['bark'] == 'tenka-natural-bark', natural_surfaces
+                assert natural_surfaces['foliage'] == 'tenka-photographic-vegetation-atlas', natural_surfaces
+                passed(f'{width}px {case["targetId"]}: atmospheric sky illuminates live terrain, foliage and timber texture detail')
                 page.wait_for_function('window.__castleTestFortressDecoded?.length===3&&window.__castleTestFortressDecoded.every(Boolean)')
                 textures = page.evaluate('Object.fromEntries(["stone","earth","plaster"].map(name=>[name,{name:window.__castleTestFortressMaps[name].name,width:window.__castleTestFortressMaps[name].image.width,height:window.__castleTestFortressMaps[name].image.height}]))')
                 assert all(item['width'] >= 512 and item['height'] >= 512 for item in textures.values()), textures

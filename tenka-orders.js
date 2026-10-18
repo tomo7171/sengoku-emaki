@@ -134,7 +134,7 @@
     if (root.TenkaSystems?.act) {
       const act = root.TenkaSystems.act;
       root.TenkaSystems.act = (state, action = {}) => {
-        const domestic = ['reclaim', 'commercial', 'levy'].includes(action.type);
+        const domestic = ['reclaim', 'commercial', 'levy', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize'].includes(action.type);
         const target = action.castleId || state.selectedCastleId;
         const explicit = action.orderCastleId ?? action.sourceId;
         if (domestic && explicit != null && explicit !== target) return failure(state, '内政・徴兵は対象の城自身の行動力で命じてください。');

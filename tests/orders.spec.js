@@ -57,14 +57,14 @@ function finish(env, battle) {
 test('each castle has three native commands, with no refill from selection or compatibility actionPoints', () => {
   const env = setup(), { Orders, Game } = env;
   let { state, a, b } = campaign(env), original = JSON.stringify(state);
-  for (let count = 0; count < 3; count++) state = use(env, state, 'develop', a);
+  for (const type of ['develop', 'train', 'repair']) state = use(env, state, type, a);
   assert.equal(Orders.remaining(state, a), 0);
   assert.equal(Orders.remaining(state, b), 3);
   assert.equal(Game.action(state, 'develop', a).ok, false);
   const selected = Orders.sync({ ...state, selectedCastleId: b });
   assert.equal(selected.actionPoints, 3);
   assert.equal(Orders.remaining(Orders.sync({ ...selected, selectedCastleId: a, actionPoints: 3 }), a), 0);
-  for (let count = 0; count < 3; count++) state = use(env, state, 'develop', b);
+  for (const type of ['develop', 'train', 'repair']) state = use(env, state, type, b);
   assert.equal(Orders.remaining(state, b), 0);
   assert.equal(Game.action(state, 'develop', b).ok, false);
   assert.ok(JSON.parse(original).castles.find(item => item.id === a).kokudaka < state.castles.find(item => item.id === a).kokudaka);
@@ -106,7 +106,7 @@ test('council administration and diplomacy debit a chosen own castle, never the 
   const env = setup(), { Orders, Systems } = env;
   let { state, a, b } = campaign(env);
   for (let count = 0; count < 3; count++) {
-    const result = Systems.act(state, { type: 'reclaim', castleId: a, orderCastleId: a, officerId: `orders-delegate-${count}` });
+    const result = Systems.act(state, { type: ['reclaim', 'commercial', 'levy'][count], castleId: a, orderCastleId: a, officerId: `orders-delegate-${count}` });
     assert.equal(result.ok, true, result.message); state = result.state;
   }
   assert.equal(Orders.remaining(state, a), 0); assert.equal(Orders.remaining(state, b), 3);

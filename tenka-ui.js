@@ -129,6 +129,98 @@ function AidRequestForm({state,onState,onNotify,war,compact=false}){
   committed.length>0&&h('div',{className:'tenka-aid-committed'},h('h5',null,'参戦予定の同盟軍'),committed.map(support=>h('article',{key:support.id},h('strong',null,(support.allyName||support.clanName||state.castles.find(c=>c.clan===support.allyClan)?.clanName||'同盟軍')+' ／ '+(support.sourceName||state.castles.find(c=>c.id===support.sourceId)?.name||'同盟国の城')+' '+format(support.troops)+' 人'),h('small',null,'戦場：'+(state.castles.find(c=>c.id===support.targetId)?.name||support.targetId)+' ／ '+(support.defending?'自家の防衛':'自家の攻勢')+' ／ '+(support.mode==='field'?'野戦':'攻城・籠城戦')),h('small',null,Object.entries(support.units||{}).filter(([,number])=>number>0).map(([type,number])=>(unitNames[type]||type)+' '+format(number)+'人').join(' ／ ')),h('button',{type:'button','aria-label':(support.sourceName||'同盟軍')+'の援軍要請を取り消す',onClick:()=>report(allies.cancelSupport(state,{supportId:support.id}))},'援軍要請を取り消す')))),
   !context&&!contexts.length&&h('p',{className:'tenka-aid-empty'},initial.message||'隣接する戦場と有効な同盟がある場合に援軍を要請できます。'));
 }
+function MarriageDiplomacy({state,onState,onNotify,orderCastleId,targetClan}){
+ const [princessId,setPrincess]=React.useState(''),[clanId,setClan]=React.useState(''),[spouseId,setSpouse]=React.useState(''),[feedback,setFeedback]=React.useState(null);
+ const diplomacy=global.TenkaDiplomacy;
+ if(!diplomacy)return null;
+ const initial=diplomacy.getView(state),princesses=initial.princesses||[];
+ const princess=princesses.find(p=>p.id===princessId)||princesses.find(p=>p.eligible)||princesses[0];
+ const view=diplomacy.getView(state,{princessId:princess?.id}),clans=view.marriageClans||[];
+ const clan=clans.find(c=>c.id===clanId)||clans.find(c=>c.id===targetClan)||clans[0];
+ const spouses=clan?.spouses||[],spouse=spouses.find(p=>p.id===spouseId)||spouses[0];
+ const action={type:'marry',princessId:princess?.id,targetClan:clan?.id,spouseId:spouse?.id,orderCastleId};
+ const preview=princess?.eligible&&spouse?diplomacy.preview(state,action):null;
+ const report=result=>{setFeedback({ok:result.ok,text:result.message});if(result.ok)onState?.(result.state);onNotify?.({text:result.message,success:result.ok});};
+ return h('section',{className:'tenka-marriage-diplomacy','aria-label':'姫と婚姻相手を選ぶ'},
+  h('div',{className:'tenka-section-heading'},h('h4',null,'姫と他家の婚姻'),h('span',null,'同盟国とも婚姻を結べます')),
+  h('p',{className:'tenka-note'},'18歳以上の未婚の姫と、相手方の成人した未婚男性を選びます。姫ごとに親族関係を確認し、婚姻できる人物を表示します。'),
+  h('div',{className:'tenka-marriage-controls'},
+   h('label',{className:'tenka-field'},h('span',null,'婚姻する姫'),h('select',{'aria-label':'婚姻する姫を選ぶ',value:princess?.id||'',disabled:!princesses.length,onChange:e=>{setPrincess(e.target.value);setClan('');setSpouse('');setFeedback(null);}},princesses.length?princesses.map(p=>h('option',{key:p.id,value:p.id},p.name+' ／ '+p.age+'歳'+(p.eligible?'':' ／ '+(p.reason||'婚姻できません')))):h('option',{value:''},'婚姻できる姫がいません'))),
+   h('label',{className:'tenka-field'},h('span',null,'婚姻を申し込む家'),h('select',{'aria-label':'婚姻を申し込む家を選ぶ',value:clan?.id||'',disabled:!clans.length||!princess?.eligible,onChange:e=>{setClan(e.target.value);setSpouse('');setFeedback(null);}},clans.length?clans.map(c=>h('option',{key:c.id,value:c.id},c.name+(state.alliances.includes(c.id)?' ／ 同盟国':''))):h('option',{value:''},'婚姻できる家がありません'))),
+   h('label',{className:'tenka-field'},h('span',null,'実際の婚姻相手'),h('select',{'aria-label':'婚姻する相手の武将を選ぶ',value:spouse?.id||'',disabled:!spouses.length||!princess?.eligible,onChange:e=>{setSpouse(e.target.value);setFeedback(null);}},spouses.length?spouses.map(p=>h('option',{key:p.id,value:p.id},p.name+' ／ '+p.age+'歳'+(p.role?' ／ '+p.role:''))):h('option',{value:''},'条件に合う婚姻相手がいません'))),
+   h('button',{type:'button',className:'tenka-primary-button',disabled:preview?.ok!==true,onClick:()=>report(diplomacy.act(state,action))},'婚姻を結ぶ')),
+  princess&&!princess.eligible&&h('p',{className:'tenka-feedback failure',role:'status'},princess.reason||'この姫は現在、婚姻できません。'),
+  !princesses.length&&h('p',{className:'tenka-note'},'姫が生まれると一門に加わります。18歳に成長した未婚の姫が必要です。'),
+  princess?.eligible&&!spouses.length&&h('p',{className:'tenka-note'},'この姫と婚姻できる成人の未婚男性が相手方にいません。別の家や姫を選ぶか、次の世代の成長をお待ちください。'),
+  preview&&h('p',{className:preview.ok?'tenka-command-cost':'tenka-feedback failure',role:preview.ok?undefined:'status'},preview.ok?'婚姻の費用：金 '+format(preview.cost?.gold)+' 貫 ／ '+(state.castles.find(c=>c.id===orderCastleId)?.name||'命令元の城')+'の命令 '+(preview.cost?.commands??1):preview.message),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text));
+}
+function DiplomacyManagement({state,onState,onNotify,targetClan,officerId,orderCastleId}){
+ const [confirmClan,setConfirm]=React.useState(''),[feedback,setFeedback]=React.useState(null);
+ const diplomacy=global.TenkaDiplomacy;
+ if(!diplomacy)return null;
+ const view=diplomacy.getView(state),target=(view.targets||[]).find(c=>c.clan===targetClan);
+ const action=type=>({type,targetClan,officerId,orderCastleId});
+ const subjugation=target?diplomacy.preview(state,action('subjugate')):null,rupture=target?.allied?diplomacy.preview(state,action('breakAlliance')):null;
+ const report=result=>{setFeedback({ok:result.ok,text:result.message});setConfirm('');if(result.ok)onState?.(result.state);onNotify?.({text:result.message,success:result.ok});};
+ const cost=preview=>'金 '+format(preview?.cost?.gold)+' 貫 ／ 命令 '+(preview?.cost?.commands??1);
+ return h('section',{className:'tenka-diplomacy-management','aria-label':'婚姻・恭順・同盟破棄'},
+  h(MarriageDiplomacy,{state,onState,onNotify,orderCastleId,targetClan}),
+  target&&h('div',{className:'tenka-diplomacy-decisions'},
+   h('article',null,h('h4',null,target.name+'に恭順を求める'),h('p',null,'国力と兵力、友好、威信をもとに従属を交渉します。相手の城と家臣団はその家のものとして存続します。'),
+    subjugation?.powerRatio!=null&&h('p',{className:'tenka-negotiation-odds'},'自家と相手の国力比 '+Number(subjugation.powerRatio).toFixed(2)+' 倍'+(subjugation.chance!=null?' ／ 受諾の見込み '+Math.round(subjugation.chance)+'％':'')),
+    subjugation?.message&&h('small',{className:subjugation.ok?'':'tenka-blocked-reason'},subjugation.message),h('small',{className:'tenka-command-cost'},cost(subjugation)),h('button',{type:'button',className:'tenka-primary-button',disabled:subjugation?.ok!==true,onClick:()=>report(diplomacy.act(state,action('subjugate')))},'恭順を求める')),
+   h('article',null,h('h4',null,target.name+'との同盟'),h('p',null,target.allied?'盟約を破棄すると相互の保護と援軍の協力が終了します。友好度 −40、威信 −10。婚姻の記録と配偶関係は残ります。':'現在、この家とは同盟を結んでいません。'),
+    target.subordinate&&h('p',null,'この家は自家に恭順中です。同盟を破棄すると恭順関係と貢納も終了します。'),
+    target.allied&&h(React.Fragment,null,h('small',{className:'tenka-command-cost'},cost(rupture)),rupture?.ok===false&&h('small',{className:'tenka-blocked-reason'},rupture.message),h('button',{type:'button',className:'tenka-danger-button',disabled:rupture?.ok!==true,onClick:()=>setConfirm(targetClan)},'同盟破棄を検討する'),
+     confirmClan===targetClan&&h('div',{className:'tenka-diplomacy-confirm',role:'alert'},h('p',null,target.name+'との同盟を破棄しますか？ 援軍・相互保護が終了し、友好度40と威信10を失います。'+(rupture?.releasesVassal?'恭順関係と貢納も解消します。':'')),h('div',null,h('button',{type:'button',className:'tenka-danger-button',onClick:()=>report(diplomacy.act(state,{...action('breakAlliance'),confirm:true}))},'同盟破棄を確定する'),h('button',{type:'button',onClick:()=>setConfirm('')},'盟約を維持する')))))),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text),
+  (view.history||[]).length>0&&h('details',{className:'tenka-aid-history'},h('summary',null,'婚姻と外交の記録'),view.history.slice(0,12).map((entry,index)=>h('article',{key:entry.id||index},h('p',null,entry.message||entry.text||entry.title)))));
+}
+function EstateManagement({state,castleId,officerId,onState,onNotify}){
+ const [policyDraft,setPolicy]=React.useState(null),[demobilizeCount,setDemobilize]=React.useState(''),[feedback,setFeedback]=React.useState(null);
+ const systems=global.TenkaSystems,view=systems.getView(state),castle=(view.castles||[]).find(c=>c.id===castleId),estate=castle?.economy;
+ if(!estate)return null;
+ const forecast=estate.forecast||{},totals=view.economy?.totals||{},remaining=global.TenkaOrders?.remaining(state,castleId)??state.actionPoints;
+ const officer=(view.officers||[]).find(o=>o.id===officerId)||view.administrationFallback;
+ const interrupted=!!state.pendingDefense||!!global.TenkaAllies?.hasPendingEngagement?.(state),blocked=!!state.gameOver||interrupted||remaining<1||!officer||officer.available===false||!!officer.busy;
+ const policyChanged=state.tenka?.estates?.[castleId]?.policyTurn===state.turn;
+ const policy=policyDraft?.castleId===castleId?policyDraft.value:estate.taxPolicy;
+ const cost=type=>estate.costs?.[type]||systems.ACTIONS[type]||{};
+ const act=(type,extra={})=>{const result=systems.act(state,{type,castleId,orderCastleId:castleId,officerId,...extra});setFeedback({ok:result.ok,text:result.message});if(result.ok)onState?.(result.state);onNotify?.({text:result.message,success:result.ok});};
+ const metric=(label,value,note)=>h('div',{className:'tenka-metric',key:label},h('small',null,label),h('strong',null,value),h('span',null,note));
+ const signed=value=>(value>=0?'+':'')+format(value);
+ const gains=(type,gain)=>type==='commercial'?'商業施設の本格操業':typeof gain==='object'?Object.entries(gain).map(([key,value])=>(key==='kokudaka'?'石高':key==='commerce'?'商業':key)+' +'+format(value)).join(' ／ '):'石高 +'+format(gain)+' 石';
+ const project=(type,title,description)=>{const plan=cost(type);return h('article',{className:'tenka-estate-project',key:type},h('h5',null,title),h('p',null,description),h('p',{className:'tenka-project-plan'},'完成まで '+format(plan.duration)+' 季 ／ 必要な働き手 '+format(plan.workforce)+' 人',h('small',null,'成果の目安：'+gains(type,plan.gain)),h('small',null,'工事中の継続費：毎季 '+format(plan.upkeep)+' 貫')),h('small',{className:'tenka-command-cost'},'着工：金 '+format(plan.gold)+' 貫 ／ 兵糧 '+format(plan.food)+' 石 ／ 命令1'),plan.reason&&h('p',{className:'tenka-blocked-reason'},plan.reason),h('button',{type:'button',className:'tenka-primary-button',disabled:blocked||plan.available===false||(state.gold||0)<(plan.gold||0)||(state.food||0)<(plan.food||0),onClick:()=>act(type)},title+'に着手'));};
+ const stockAction=(type,title,description)=>{const plan=cost(type),needsGold=plan.gold||0,needsFood=plan.food||0,reserve=type==='sellGrain'?Math.ceil((totals.foodUpkeep||0)*2):0,shortage=(state.food||0)-needsFood<reserve;return h('article',{key:type},h('h5',null,title),h('p',null,description),h('small',{className:'tenka-command-cost'},'金 '+format(needsGold)+' 貫 ／ 兵糧 '+format(needsFood)+' 石 ／ 命令1'),reserve>0&&h('small',{className:shortage?'tenka-blocked-reason':'tenka-command-cost'},'売却後に残す備蓄：'+format(reserve)+' 石'+(shortage?'。兵糧が足りないため売却できません。':'')),h('button',{type:'button',disabled:blocked||(state.gold||0)<needsGold||(state.food||0)<needsFood||shortage,onClick:()=>act(type)},title));};
+ return h('section',{className:'tenka-estate-management','aria-label':'領国の経営計画'},
+  h('div',{className:'tenka-section-heading'},h('h4',null,'領国の収支と民の暮らし'),h('span',null,estate.taxLabel+' ／ '+castle.name)),
+  h('div',{className:'tenka-metrics'},metric('季節の収支',signed(forecast.netIncome)+' 貫','収入 '+format(forecast.income)+' − 支出 '+format(forecast.upkeep)),metric('兵糧の維持',format(forecast.foodUpkeep)+' 石 / 季','次の秋の収穫 '+format(forecast.harvest)+' 石'),metric('働き手の余力',format(estate.laborAvailable)+' 人','工事に従事 '+format((estate.projects||[]).reduce((sum,p)=>sum+(p.workforce||0),0))+' 人 ／ 農作業の効率 '+format(estate.laborEfficiency)+'％'),metric('民の不満',format(estate.unrest)+' / 100','重税・徴兵・窮乏が治安と生産に影響')),
+  h('div',{className:'tenka-estate-reserve'},h('strong',null,'全領国の蓄え：金 '+format(state.gold)+' 貫 ／ 兵糧 '+format(state.food)+' 石'),h('span',null,'全領国の季節収支 '+signed(totals.netIncome)+' 貫 ／ 兵糧の維持 '+format(totals.foodUpkeep)+' 石'),h('span',null,'現在の兵糧で約 '+(Number.isFinite(view.economy?.reserveSeasons)?Math.round(view.economy.reserveSeasons*10)/10:'—')+' 季を維持できます。秋の収穫や次の出兵費は別に見積もってください。')),
+  h('details',{className:'tenka-estate-breakdown'},h('summary',null,'この城の収支の内訳を見る'),h('dl',null,[['年貢・税収',forecast.taxIncome],['商業収入',forecast.commerceIncome],['兵の維持費',forecast.militaryUpkeep],['城・領地の維持費',forecast.maintenance],['工事の継続費',forecast.projectUpkeep]].map(([label,value])=>h('div',{key:label},h('dt',null,label),h('dd',null,format(value)+' 貫'))))),
+  h('div',{className:'tenka-estate-policy'},h('label',{className:'tenka-field'},h('span',null,'この城の年貢・税の方針'),h('select',{'aria-label':'年貢と税の方針',value:policy,disabled:blocked||policyChanged,onChange:e=>setPolicy({castleId,value:e.target.value})},(view.economy?.policies||[]).map(p=>h('option',{value:p.id,key:p.id},p.label)))),h('button',{type:'button',disabled:blocked||policyChanged||policy===estate.taxPolicy,onClick:()=>act('tax',{policy})},'税の方針を改める'),h('p',null,(view.economy?.policies||[]).find(p=>p.id===policy)?.description||''),h('small',null,policyChanged?'この城の年貢方針は今季変更済みです。次の季節に再検討できます。':'方針の変更はこの城の命令1。同じ季節の変更は1回まで。')),
+  h('div',{className:'tenka-section-heading'},h('h4',null,'継続する開発計画'),h('span',null,'開発余地 '+format(estate.developmentCapacity)+' ／ 開墾済み '+format(estate.reclaimed))),
+  h('div',{className:'tenka-estate-projects'},project('reclaim','田畑の開墾','働き手と兵糧を継続して充て、新田の完成を待ちます。'),project('commercial','商いの振興','街道と城下に投資します。維持費を含めた収支と人手を確かめましょう。')),
+  estate.projects?.length?h('div',{className:'tenka-project-progress'},h('h5',null,'進行中の工事'),estate.projects.map(p=>h('article',{key:p.id},h('strong',null,p.label||p.type),h('span',null,'完成まであと '+format(p.remaining)+' / '+format(p.total)+' 季 ／ 働き手 '+format(p.workforce)+' 人 ／ 継続費 '+format(p.upkeep)+' 貫'),h('span',null,'完成時：'+gains(p.type,p.gain)),p.status&&h('small',null,p.status)))):h('p',{className:'tenka-note'},'現在、進行中の工事はありません。開発には数季を要し、働き手と維持費を使います。'),
+  h('div',{className:'tenka-estate-stocks'},stockAction('relief','領民を救済する','金80貫と兵糧600石を配り、民の不満を抑えます。'),stockAction('buyGrain','兵糧を買い入れる','金400貫で兵糧1,200石を確保します。'),stockAction('sellGrain','兵糧を売却する','兵糧1,200石を金300貫に換えます。売却後も2季分の備蓄が必要です。')),
+  h('div',{className:'tenka-estate-demobilize'},h('label',{className:'tenka-field'},h('span',null,'農村へ帰す兵の人数'),h('input',{type:'number',inputMode:'numeric',min:1,step:1,max:Math.max(0,(castle.troops||0)-150),'aria-label':'解兵する人数',value:demobilizeCount,onChange:e=>setDemobilize(e.target.value)})),h('button',{type:'button',disabled:blocked||!Number.isSafeInteger(Number(demobilizeCount))||Number(demobilizeCount)<=0||Number(demobilizeCount)>(castle.troops||0)-150,onClick:()=>act('demobilize',{troops:Number(demobilizeCount)})},'指定人数を解兵する'),h('small',null,'守備兵を150人以上残します。兵を農村へ帰し、兵糧の消費と働き手の不足を緩和します。命令1。')),
+  interrupted&&h('p',{className:'tenka-blocked-reason'},'先に合戦・援軍への対応を決めてください。'),remaining<1&&h('p',{className:'tenka-blocked-reason'},'この城の今季の命令がありません。別の城を選ぶか、次の季節へ進んでください。'),officer?.busy&&h('p',{className:'tenka-blocked-reason'},'この武将は今季の任務中です。別の武将か奉行衆を担当に選んでください。'),
+  feedback&&h('p',{className:'tenka-feedback '+(feedback.ok?'success':'failure'),role:'status'},feedback.text));
+}
+function TacticalCommandStatus({battle,onBattle,selectedUnitId}){
+ const [feedback,setFeedback]=React.useState('');
+ const tactics=global.TenkaTactics;
+ if(!tactics?.tacticalView)return null;
+ const view=tactics.tacticalView(battle,selectedUnitId),selected=view.selected,side=battle.playerSide||'attacker';
+ const setStance=key=>{const result=tactics.stance(battle,selected.id,key);setFeedback(result.message||'部隊の構えを変更しました。');if(result.ok&&result.battle)onBattle?.(result.battle);};
+ return h('section',{className:'tenka-tactical-status','aria-label':'部隊の疲労・隊列と戦い方'},
+  selected?h(React.Fragment,null,h('div',{className:'tenka-tactical-readiness'},h('strong',null,'戦闘態勢 '+format(selected.readiness)+' / 100'),h('span',null,'疲労 '+format(selected.fatigue)+' ／ 隊列 '+format(selected.cohesion)+' ／ 制圧 '+format(selected.suppression)),h('small',null,selected.exposure+' ／ '+selected.fireLane)),
+   h('div',{className:'tenka-stance-controls',role:'group','aria-label':'部隊の戦い方'},Object.entries(tactics.stances||{}).map(([key,stance])=>h('button',{type:'button',key,'aria-pressed':selected.stance===key,disabled:selected.side!==side||!['deployment','fighting'].includes(battle.phase),title:stance.description,onClick:()=>setStance(key)},stance.name))),
+   h('p',{className:'tenka-stance-description'},tactics.stances?.[selected.stance]?.description||''),
+   (selected.advice||[]).length>0&&h('ul',{className:'tenka-tactical-advice'},selected.advice.map((text,index)=>h('li',{key:index},text)))):h('p',null,'味方部隊を選ぶと、疲労・隊列・射界を確認し、休息や迎撃などの戦い方を指示できます。'),
+  h('details',null,h('summary',null,'戦場で判断すること'),h('ul',null,(view.principles||[]).map((text,index)=>h('li',{key:index},text)))),
+  feedback&&h('p',{className:'tenka-placement-status',role:'status'},feedback));
+}
 function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
  const systems=global.TenkaSystems;
  const [tab,setTab]=React.useState('政務');
@@ -212,14 +304,16 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
   tab==='政務'&&castle&&h('section',null,
    h('div',{className:'tenka-section-heading'},h('h4',null,castle.province+'・'+castle.name),h('span',null,'石高と民力が動員・収穫の土台になります')),
    h('div',{className:'tenka-metrics'},metric('石高',format(castle.kokudaka)+' 石','秋の収穫を支える生産力'),metric('動員枠',format(systems.mobilizationLimit(castle))+' 人','現兵力 '+format(castle.troops)+' 人'),metric('商業',format(economy.commerce)+'','季節収入 +'+format(economy.income)+' 貫'),metric('人口',format(castle.population)+' 人','開墾と商いを担う領民'),metric('士気',castle.morale+' / 100','兵糧の不足・敗戦で低下')),
-   h('div',{className:'tenka-action-grid'},actions('reclaim','田畑の開墾','新田を開き石高を増加。担当武将の政治力が成果を左右します。'),actions('commercial','商いの振興','街道・城下の商業を育て、季節ごとの銭収入を増やします。'),actions('levy','兵の動員','石高・人口・地形に応じた上限まで徴募。兵には継続して兵糧が必要です。')),
-   h('p',{className:'tenka-note'},'戦争は領国の余力で支えます。開墾と商業への投資を先に行い、守備兵と兵糧を残して出陣しましょう。')),
+   h(EstateManagement,{state,castleId:castle.id,officerId:chosen?.id,onState,onNotify}),
+   h('div',{className:'tenka-action-grid'},!economy.economy&&actions('reclaim','田畑の開墾','新田を開き石高を増加。担当武将の政治力が成果を左右します。'),!economy.economy&&actions('commercial','商いの振興','街道・城下の商業を育て、季節ごとの銭収入を増やします。'),actions('levy','兵の動員','石高・人口・地形に応じた上限まで徴募。農村の働き手と兵糧の余力を確かめてください。')),
+   h('p',{className:'tenka-note'},'戦争は領国の余力で支えます。開発中の人手・税負担・城の維持費を見比べ、凶作や出兵に備えて兵糧と金を残しましょう。')),
   tab==='外交'&&h(AidRequests,{state,onState,onNotify}),
   tab==='外交'&&h(AidRequestForm,{state,onState,onNotify}),
   tab==='外交'&&target&&h('section',null,
    h('div',{className:'tenka-metrics'},metric('交渉先',target.clanName,target.name),metric('外交関係',(state.relations[target.clan]??0)+'',state.alliances.includes(target.clan)?'盟約を締結中':'信頼を重ねて盟約へ'),metric('相手の兵力',format(target.troops)+' 人','消耗した勢力には交渉の余地も生まれます')),
    h('div',{className:'tenka-action-grid'},actions('negotiation','使者と贈答','家臣を使者に送り関係を改善。十分な信頼を得れば期限付きの盟約を結びます。')),
-   h('p',{className:'tenka-note'},'同盟国への侵攻はできません。周辺の強国と交渉し、戦線を絞ることも天下への道です。')),
+   h(DiplomacyManagement,{state,onState,onNotify,targetClan:target.clan,officerId:chosen?.id,orderCastleId:castle?.id}),
+   h('p',{className:'tenka-note'},'同盟国への侵攻はできません。婚姻で家同士を結び、恭順の交渉で従属関係を築けます。同盟の破棄には友好と威信を失う代償があります。')),
   tab==='調略'&&target&&h('section',null,
    field('内応を誘う武将',selector(opposition.some(o=>o.id===targetOfficerId)?targetOfficerId:opposition[0]?.id||'',setTargetOfficer,opposition.map(o=>({id:o.id,label:o.name+' ／ 忠誠 '+loyalty(o)})),'調略の対象武将')),
    h('div',{className:'tenka-action-grid'},actions('infiltrate','内応の密約','知略に長けた家臣を送り、敵将の忠誠を揺さぶります。疲弊した守備と低い忠誠は離反の機会になります。')),
@@ -246,10 +340,7 @@ function Council({state,onState,selectedCastleId,onNotify,onNextSeason}){
    kin.length?h('div',{className:'tenka-officer-grid'},kin.map(o=>h('article',{className:'tenka-officer',key:o.id},h(Portrait,{officer:o,year:state.year,size:62}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)),h('small',null,['dead','executed'].includes(o.status)?'故人':o.status==='captive'?'捕縛中':o.id===family.head?.id?'当主':o.id===family.heir?.id?'世継ぎ':age(o)<15?'幼年・'+(o.birth+15)+'年に元服':'元服済み・一門衆'))))):h('p',{className:'tenka-note'},'一門の誕生や養子によって、ここに家族が加わります。世継ぎは家臣団からも指定できます。'),
    h('div',{className:'tenka-section-heading'},h('h4',null,'姫と政略結婚'),h('span',null,'姫は18歳から婚姻を結べます')),
    princesses.length?h('div',{className:'tenka-officer-grid'},princesses.map(o=>h('article',{className:'tenka-officer',key:o.id},h(Portrait,{officer:o,year:state.year,size:62}),h('div',null,h('strong',null,o.name),h('span',{className:'tenka-person-tag'},originLabel(o)+' ／ '+ageLabel(o)),h('small',null,['dead','executed'].includes(o.status)?'故人':o.status==='captive'?'捕縛中':o.marriedTo?'婚姻済み':age(o)<18?'成長を見守る・'+(o.birth+18)+'年から婚姻可':'婚姻可能'))))):h('p',{className:'tenka-note'},'姫が誕生するとここに加わります。成長後は他家との婚姻で外交関係を結べます。'),
-   h('div',{className:'tenka-marriage-controls'},
-    field('婚姻する姫',selector(selectedPrincess?.id||'',setPrincess,princesses.filter(marriageable).map(o=>({id:o.id,label:o.name+' ／ '+ageLabel(o)})),'婚姻する姫を選ぶ')),
-    field('婚姻相手',selector(selectedMarriage?.id||'',setMarriageClan,marriageClans.map(c=>({id:c.id,label:c.name+' ／ '+c.spouseName})),'婚姻を申し込む家を選ぶ')),
-    h('button',{className:'tenka-primary-button',disabled:!selectedPrincess||!selectedMarriage||!!state.pendingDefense,onClick:()=>dynastyAct('marry',{princessId:selectedPrincess.id,targetClan:selectedMarriage.id,spouseId:selectedMarriage.spouseId})},'婚姻を結ぶ')),
+   h(MarriageDiplomacy,{state,onState,onNotify,orderCastleId:castle?.id}),
    h('div',{className:'tenka-section-heading'},h('h4',null,'次の世代の便り'),h('span',null,'史実の生年と元服年')),
    (dynastyView.upcoming||[]).length?h('div',{className:'tenka-upcoming'},dynastyView.upcoming.map(event=>h('article',{key:event.id},h('strong',null,event.year+'年'),h('div',null,h('span',{className:'tenka-person-tag'},event.origin==='fictional'?'この年代記':event.kind==='birth'?'史実の生年':'元服の予定'),h('h5',null,event.title),h('p',null,event.text))))):h('p',{className:'tenka-note'},'近い将来の誕生・元服の知らせはありません。在地人材の登用は毎季行えます。')),
   tab==='軍学'&&h('section',null,h('div',{className:'tenka-section-heading'},h('h4',null,'兵科・地形・兵站'),h('span',null,'戦略を、戦場の配置につなぐ')),
@@ -358,11 +449,12 @@ function Tactics({battle,onBattle,selectedUnitId,onSelectedUnitChange,deployment
     h('form',{className:'tenka-fieldworks-coordinates',onSubmit:place},h('label',null,'東西 X',h('input',{type:'number',step:'any',min:zone.xMin,max:zone.xMax,'aria-label':'陣・柵の東西座標',value:x,onChange:e=>coordinate('x',e.target.value)})),h('label',null,'南北 Z',h('input',{type:'number',step:'any',min:zone.zMin,max:zone.zMax,'aria-label':'陣・柵の南北座標',value:z,onChange:e=>coordinate('z',e.target.value)})),h('label',null,'向き',h('select',{'aria-label':'陣・柵の向き',value:rotation,onChange:e=>rotate(e.target.value)},[0,30,45,60,90,120,135,150,180,210,225,240,270,300,315,330].map(angle=>h('option',{key:angle,value:angle},angle+'°')))),h('button',{type:'submit',disabled:!selected&&budget?.[kind]?.remaining===0},selected?'この座標へ移設':'この座標に設置'),selected&&h('button',{type:'button',className:'tenka-remove-work',onClick:remove},'撤去する')),
     h('small',null,'水面・城郭・部隊と重なる場所には設営できません。城壁や城門など既存の城の施設は移設できません。'))),
   unit&&h('div',{className:'tenka-unit-doctrine'},h('strong',null,(unit.commanderName||'組頭')+'隊 · '+(unitNames[unit.type]||'部隊')),h('label',null,'陣形 ',h('select',{'aria-label':'部隊の陣形',value:unit.formation||'line',onChange:e=>formation(e.target.value)},[['line','横陣'],['wedge','魚鱗'],['defensive','方円'],['loose','散開']].map(([id,label])=>h('option',{value:id,key:id},label)))),h('button',{type:'button',onClick:ambush,disabled:!deploying},unit.ambush?'伏兵を解除':'伏兵を配置')),
+  h(TacticalCommandStatus,{battle,onBattle,selectedUnitId:unit?.id||selectedUnitId}),
   h('small',{className:'tenka-placement-status',role:'status','aria-live':'polite'},message||(deploying?'配置を終えたら「戦闘開始」を押してください。':unit?'森林・丘陵での伏兵は初撃を強化。陣形により移動と攻防が変化します。':'')),
   battle.supply&&h('small',{className:'tenka-supply-note'},'自軍の兵糧：'+format(Math.max(0,battle.supply[side].initial-battle.supply[side].consumed))+' 石 ／ 合戦中の消費 '+format(battle.supply[side].consumed)+' 石'));
 }
 
-return {Council,Tactics,Portrait,BattleAftermath,RetainerStations,AidRequests,AidRequestForm};
+return {Council,Tactics,Portrait,BattleAftermath,RetainerStations,AidRequests,AidRequestForm,MarriageDiplomacy,DiplomacyManagement,EstateManagement,TacticalCommandStatus};
 }
 global.TenkaUI={create,era,battleAftermathView};
 })(typeof window==='undefined'?globalThis:window);

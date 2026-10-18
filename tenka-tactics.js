@@ -15,6 +15,12 @@
     firearm: { cavalry: 1.4, ashigaru: 1.24, archer: 0.98 },
     navy: { navy: 1, ashigaru: 1.18, archer: 1.05, cavalry: 1.25 },
   });
+  const STANCES = Object.freeze({
+    balanced: Object.freeze({ name: "通常", description: "隊列を保って進撃。移動と戦闘が続くと疲労が蓄積" }),
+    brace: Object.freeze({ name: "迎撃", description: "現在地で迎撃。正面の突撃に強く、射撃隊は狙いを定める" }),
+    charge: Object.freeze({ name: "強行・突撃", description: "速く前進し、勢いのある接近戦を強化。疲労と隊列の乱れに注意" }),
+    rest: Object.freeze({ name: "休息", description: "攻撃と移動を止める。敵から離れると疲労・隊列・制圧を回復" }),
+  });
   const FORTIFICATIONS = Object.freeze({
     camp: { name: "陣地", limit: 2, w: 5, d: 4, h: 2.8, hp: 500, description: "半径九以内の味方の被害を軽減し、士気をゆっくり回復" },
     palisade: { name: "木柵", limit: 8, w: 7, d: 1, h: 2.2, hp: 800, description: "両軍の通行を遮る。味方は迂回し、敵は攻撃して破壊できる" },
@@ -283,6 +289,7 @@
     battle.playerSide = options.defending ? "defender" : battle.playerSide || "attacker";
     battle.defending = battle.playerSide === "defender";
     battle.tacticsVersion = 1;
+    battle.tacticalDepthVersion = 1;
     battle.fortifications = battle.fortifications || [];
     battle.fortificationSerial = battle.fortificationSerial || 1;
     battle.supply = battle.supply || {
@@ -298,6 +305,12 @@
       if (unit.ambush == null) unit.ambush = false;
       if (unit.revealed == null) unit.revealed = true;
       if (unit.ambushUntil == null) unit.ambushUntil = 0;
+      unit.stance = unit.stance || "balanced";
+      unit.fatigue = unit.fatigue ?? 0;
+      unit.cohesion = unit.cohesion ?? 100;
+      unit.suppression = unit.suppression ?? 0;
+      unit.steadyTime = unit.steadyTime ?? 0;
+      unit.chargeMomentum = unit.chargeMomentum ?? 0;
       if (battle.defending && unit.side === "attacker") unit.order = "attack";
     }
     if (battle.defending) {
@@ -310,15 +323,20 @@
     return battle;
   }
   function create(options) {
+    const available = Math.max(0, options.state.food - 600);
+    if (options.carriedSupply !== undefined && (!Number.isSafeInteger(options.carriedSupply) || options.carriedSupply < 0 || options.carriedSupply > available)) throw Error("持ち込む兵糧は、出陣費六百を差し引いた在庫以内の整数で指定してください。");
     const battle = original.create(options);
     addAlliedSupport(battle, options.state);
-    return prepare(battle, { attackerFood: Math.max(0, options.state.food - 600), defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
+    if (options.carriedSupply !== undefined) battle.carriedSupply = options.carriedSupply;
+    return prepare(battle, { attackerFood: options.carriedSupply ?? available, defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
   }
   function createDefense(state, threat = state.pendingDefense, options = {}) {
     if (!original || !threat) throw Error("迎撃する侵攻軍が見つかりません。");
     const source = state.castles.find((castle) => castle.id === threat.sourceId);
     const target = state.castles.find((castle) => castle.id === threat.targetId);
     if (!source || !target || target.clan !== state.playerClan || source.clan === state.playerClan || !source.neighbors.includes(target.id)) throw Error("侵攻先と自領の関係を確認してください。");
+    if (root.TenkaDiplomacy?.isProtectedPair?.(state, source.clan, target.clan)) throw Error("同盟・恭順関係にある家の侵攻は外交で解除されています。戦況を更新してください。");
+    if (options.carriedSupply !== undefined && (!Number.isSafeInteger(options.carriedSupply) || options.carriedSupply < 0 || options.carriedSupply > Math.max(0, state.food))) throw Error("籠城に確保する兵糧は、在庫以内の整数で指定してください。");
     const enemyState = copy(state);
     enemyState.playerClan = source.clan;
     enemyState.actionPoints = Math.max(1, enemyState.actionPoints);
@@ -329,8 +347,9 @@
     const battle = original.create({ state: enemyState, sourceId: source.id, targetId: target.id, mode: threat.mode || "siege" });
     battle.stateStamp = stamp(state);
     battle.id = `tactical-defense-${battle.stateStamp}-${source.id}-${target.id}-${battle.mode}`;
+    if (options.carriedSupply !== undefined) battle.carriedSupply = options.carriedSupply;
     addAlliedSupport(battle, state, true);
-    return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: state.food, battlefieldVersion: options.battlefieldVersion });
+    return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: options.carriedSupply ?? state.food, battlefieldVersion: options.battlefieldVersion });
   }
   function deploy(battle, command = {}) {
     if (battle.phase !== "deployment") return reject(battle, "配置を変えられるのは開戦前だけです。");
@@ -360,6 +379,7 @@
   }
   function order(battle, command = {}) {
     if (command.order === "ambush") return ambush(battle, command.unitId);
+    if (command.order === "rest" || command.order === "charge") return stance(battle, command.unitId, command.order);
     if (battle.phase !== "fighting") return reject(battle, "命令を出せるのは合戦中だけです。");
     const side = friendly(battle), unit = battle.units.find((item) => item.id === command.unitId && item.side === side && active(item));
     if (!unit || !["move", "attack", "hold", "retreat"].includes(command.order)) return reject(battle, "活動中の自軍部隊と有効な命令を選んでください。");
@@ -369,6 +389,8 @@
     if (command.targetId && !battle.units.some((item) => item.id === command.targetId && item.side !== side) && !(side === "attacker" && battle.structures.some((item) => item.id === command.targetId)) && !(battle.fortifications || []).some((item) => item.id === command.targetId && item.side !== side && item.hp > 0)) return reject(battle, "敵部隊または攻撃可能な施設を選んでください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unit.id);
     Object.assign(selected, { order: command.order, targetId: command.targetId || null, targetX: x, targetZ: command.order === "retreat" ? side === "attacker" ? box.maxZ - 1 : box.minZ + 1 : z, status: command.order === "retreat" ? "retreating" : "fighting" });
+    if (["move", "attack", "retreat"].includes(command.order) && ["brace", "rest"].includes(selected.stance)) selected.stance = "balanced";
+    if (command.order === "hold" && selected.stance === "charge") selected.stance = "balanced";
     if (command.order !== "hold") { selected.ambush = false; selected.revealed = true; }
     result.ledger.push({ kind: "order", command: { unitId: unit.id, order: command.order, x, z, targetId: command.targetId || null } });
     return { battle: result, ok: true, message: "部隊へ命令を伝えました。" };
@@ -378,9 +400,33 @@
     const unit = battle.units.find((item) => item.id === unitId && item.side === friendly(battle) && active(item));
     if (!unit) return reject(battle, "自軍の部隊を選んでください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unitId);
+    if (battle.phase === "fighting" && selected.formation !== value) {
+      selected.cohesion = Math.max(0, (selected.cohesion ?? 100) - 12);
+      selected.steadyTime = 0;
+    }
     selected.formation = value;
     result.ledger.push({ kind: "formation", command: { unitId, formation: value } });
     return { battle: result, ok: true, message: `${selected.commanderName}隊を${FORMATIONS[value].name}に変更。${FORMATIONS[value].description}。` };
+  }
+  function stance(battle, unitId, value) {
+    if (!["deployment", "fighting"].includes(battle.phase) || !Object.hasOwn(STANCES, value)) return reject(battle, "布陣中または合戦中に、有効な戦闘方針を選んでください。");
+    const unit = battle.units.find((item) => item.id === unitId && item.side === friendly(battle) && active(item));
+    if (!unit) return reject(battle, "活動中の自軍部隊を選んでください。");
+    const result = copy(battle), selected = result.units.find((item) => item.id === unitId);
+    selected.stance = value;
+    if (["brace", "rest"].includes(value)) {
+      selected.order = "hold";
+      selected.targetId = null;
+      selected.targetX = selected.x;
+      selected.targetZ = selected.z;
+      selected.chargeMomentum = 0;
+    } else if (value === "charge") {
+      selected.order = "attack";
+      selected.ambush = false;
+      selected.revealed = true;
+    }
+    result.ledger.push({ kind: "stance", command: { unitId, stance: value } });
+    return { battle: result, ok: true, message: `${selected.commanderName}隊を${STANCES[value].name}に変更。${STANCES[value].description}。` };
   }
   function canAmbush(battle, unit) {
     return unit.type !== "navy" && unit.type !== "cavalry" && (["mountain", "hill", "forest"].includes(battle.terrain) || (battle.terrainFeatures || []).some((feature) => feature.type === "forest" && Math.hypot(unit.x - feature.x, unit.z - feature.z) <= feature.radius));
@@ -399,23 +445,81 @@
     result.ledger.push({ kind: "ambush", command: { unitId } });
     return { battle: result, ok: true, message: selected.ambush ? "伏兵を配置。敵が接近すると奇襲し、短時間だけ攻撃と士気崩しが強まります。" : "伏兵を解除しました。" };
   }
+  function facingVector(unit) {
+    const length = Math.hypot(unit.facingX || 0, unit.facingZ || 0);
+    return length ? { x: unit.facingX / length, z: unit.facingZ / length } : { x: 0, z: unit.side === "attacker" ? -1 : 1 };
+  }
+  function facingDot(unit, other) {
+    const dx = other.x - unit.x, dz = other.z - unit.z, length = Math.hypot(dx, dz), facing = facingVector(unit);
+    return length ? (dx * facing.x + dz * facing.z) / length : 1;
+  }
+  function shotLane(battle, unit, target) {
+    if (!["firearm", "archer", "navy"].includes(unit.type) || !target) return { factor: 1, label: "射界良好" };
+    const structures = battle.structures.filter((item) => item.id !== target.id && item.hp > 0 && ["wall", "gate", "hall"].includes(item.kind || item.type));
+    if (structures.some((item) => !contains(item, unit.x, unit.z, .3) && !contains(item, target.x, target.z, .3) && segmentHits({ ...item, w: item.w ?? item.width, d: item.d ?? item.depth }, unit.x, unit.z, target.x, target.z))) return { factor: unit.type === "archer" ? .66 : .24, label: "城壁で遮蔽" };
+    const dx = target.x - unit.x, dz = target.z - unit.z, squared = dx * dx + dz * dz;
+    const screen = squared > 16 && battle.units.some((ally) => {
+      if (ally.id === unit.id || ally.side !== unit.side || !active(ally)) return false;
+      const projection = ((ally.x - unit.x) * dx + (ally.z - unit.z) * dz) / squared;
+      return projection > .14 && projection < .86 && Math.hypot(ally.x - unit.x - dx * projection, ally.z - unit.z - dz * projection) < 1.65;
+    });
+    return screen ? { factor: unit.type === "archer" ? .9 : .38, label: "味方が射線上" } : { factor: 1, label: "射界良好" };
+  }
+  function nearestEnemy(battle, unit) {
+    return battle.units.filter((other) => other.side !== unit.side && active(other) && !(other.ambush && !other.revealed)).sort((a, b) => Math.hypot(unit.x - a.x, unit.z - a.z) - Math.hypot(unit.x - b.x, unit.z - b.z))[0];
+  }
+  function exposure(battle, unit) {
+    const enemies = battle.units.filter((other) => other.side !== unit.side && active(other) && !(other.ambush && !other.revealed) && Math.hypot(unit.x - other.x, unit.z - other.z) < 9);
+    if (!enemies.length) return "未接敵";
+    if (enemies.some((a, index) => enemies.slice(index + 1).some((b) => {
+      const ax = a.x - unit.x, az = a.z - unit.z, bx = b.x - unit.x, bz = b.z - unit.z;
+      return (ax * bx + az * bz) / Math.max(.1, Math.hypot(ax, az) * Math.hypot(bx, bz)) < -.45;
+    }))) return "包囲";
+    const dot = Math.min(...enemies.map((enemy) => facingDot(unit, enemy)));
+    return dot < -.35 ? "背面" : dot < .5 ? "側面" : "正面";
+  }
+  function readiness(unit) {
+    return clamp(Math.round((100 - (unit.fatigue || 0) * .48) * (.65 + (unit.cohesion ?? 100) * .0035) * (1 - (unit.suppression || 0) * .002)), 0, 100);
+  }
+  function tacticalView(battle, unitId = null) {
+    const units = battle.units.filter(active).map((unit) => {
+      const enemy = nearestEnemy(battle, unit), lane = shotLane(battle, unit, enemy), exposed = exposure(battle, unit), advice = [];
+      if ((unit.fatigue || 0) >= 55) advice.push("敵から距離を取り、予備隊と交代して休息してください。");
+      if ((unit.cohesion ?? 100) < 65) advice.push("陣形変更や強行を控え、停止して隊列を立て直してください。");
+      if ((unit.suppression || 0) >= 35) advice.push("射撃で制圧されています。散開・遮蔽物・射手への側面攻撃を使ってください。");
+      if (["側面", "背面", "包囲"].includes(exposed)) advice.push("側背面が脅かされています。味方の予備隊か方円・迎撃で支えてください。");
+      if (lane.factor < .8) advice.push("鉄砲隊を横へ動かし、味方と城壁を避けて射線を開いてください。");
+      return { id: unit.id, side: unit.side, commanderName: unit.commanderName, stance: unit.stance || "balanced", stanceName: (STANCES[unit.stance] || STANCES.balanced).name,
+        fatigue: Math.round(unit.fatigue || 0), cohesion: Math.round(unit.cohesion ?? 100), suppression: Math.round(unit.suppression || 0), readiness: readiness(unit), exposure: exposed, fireLane: lane.label, advice };
+    });
+    return { version: 1, units, selected: units.find((unit) => unit.id === unitId) || null, principles: ["射手の射線を開き、槍隊で守り、騎馬で側背面を突くと有利です。", "強行と陣形変更の連続は隊列を乱します。予備隊を残して交代・休息してください。", "迎撃は正面の突撃に強く、散開は射撃に強い一方、接近戦では崩れやすくなります。"] };
+  }
   function damage(battle, attacker, target, structure) {
     if (attacker.fieldworkTarget) return 0;
     if (attacker.ambush && !attacker.revealed) return 0;
+    if (attacker.stance === "rest") return 0;
     if (target.ambush && !target.revealed && Math.hypot(attacker.x - target.x, attacker.z - target.z) > 11) return 0;
     const attackFormation = FORMATIONS[attacker.formation] || FORMATIONS.line;
     const defendFormation = FORMATIONS[target.formation] || FORMATIONS.line;
     const ranged = ["archer", "firearm", "navy"].includes(attacker.type);
     let factor = ranged ? attackFormation.ranged : attackFormation.attack;
+    factor *= (1 - (attacker.fatigue || 0) * .0036) * (.72 + (attacker.cohesion ?? 100) * .0028) * (1 - (attacker.suppression || 0) * .0025);
+    if (ranged) factor *= (.76 + Math.min(2, attacker.steadyTime || 0) * .12) * shotLane(battle, attacker, target).factor;
+    if (attacker.stance === "brace") factor *= ranged ? 1.08 : .92;
+    if (attacker.stance === "charge" && !ranged && !structure) factor *= 1 + (attacker.chargeMomentum || 0) * .26;
+    if (attacker.side && battle.supply?.[attacker.side]?.exhausted) factor *= .78;
     if (!structure) {
       factor *= MATCHUPS[attacker.type]?.[target.type] || 1;
       factor /= defendFormation.defense;
       if (ranged && target.formation === "loose") factor *= 0.74;
       if (!ranged && target.formation === "loose") factor *= 1.13;
       if (attacker.type === "cavalry" && target.formation === "defensive") factor *= 0.73;
-      const deltaX = attacker.x - target.x, deltaZ = attacker.z - target.z, distance = Math.hypot(deltaX, deltaZ);
-      const facing = distance ? (deltaX * (target.facingX || 0) + deltaZ * (target.facingZ || (target.side === "attacker" ? -1 : 1))) / distance : 1;
+      const facing = facingDot(target, attacker);
       if (facing < -0.35 && target.formation !== "defensive") factor *= 1.3;
+      else if (facing < .45 && target.formation !== "defensive") factor *= 1.1;
+      if (target.stance === "brace" && facing > .35) factor /= !ranged && attacker.type === "cavalry" ? 1.35 : 1.12;
+      if (target.stance === "rest") factor *= 1.18;
+      factor /= .85 + (target.cohesion ?? 100) * .0015;
       if (["mountain", "hill", "forest"].includes(battle.terrain) && target.order === "hold") factor *= 0.86;
       if (attacker.ambushUntil > battle.time) factor *= 1.65;
       if (ranged && (battle.terrainFeatures || []).some((feature) => feature.type === "forest" && Math.hypot(target.x - feature.x, target.z - feature.z) <= feature.radius)) factor *= 0.82;
@@ -423,7 +527,12 @@
       if ((battle.fortifications || []).some((item) => item.kind === "camp" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9)) factor /= 1.12;
       if ((battle.fortifications || []).some((item) => item.kind === "palisade" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9 && segmentHits(item, attacker.x, attacker.z, target.x, target.z))) factor *= ranged ? 0.68 : 0.82;
     }
-    return original.damage(battle, attacker, target, structure) * factor;
+    const amount = original.damage(battle, attacker, target, structure) * factor;
+    if (battle._tacticalStep && amount > 0) {
+      attacker.lastAttackTime = battle.time;
+      if (!structure && ranged) target._incomingPressure = (target._incomingPressure || 0) + amount / Math.max(1, target.maxTroops) * (attacker.type === "firearm" ? 60 : 35) * (target.formation === "loose" ? .65 : 1);
+    }
+    return amount;
   }
   function fencePenetration(structure, x, z, padding = .45) {
     const angle = (structure.rotation || 0) * Math.PI / 180, dx = x - structure.x, dz = z - structure.z;
@@ -483,8 +592,13 @@
   }
   function move(battle, unit, x, z) {
     if (unit.fieldworkTarget) return;
+    if (unit.order === "retreat") {
+      unit.stance = "balanced";
+      unit.ambush = false;
+      unit.revealed = true;
+    }
     if (unit.ambush && !unit.revealed) return;
-    if (battle.defending && unit.side === "defender" && unit.order === "hold") return;
+    if ((unit.order === "hold" && unit.side === friendly(battle)) || ["rest", "brace"].includes(unit.stance)) return;
     // The engine chooses a normalized movement vector; scaling its target distance
     // preserves collision handling while changing the step size below.
     const oldX = unit.x, oldZ = unit.z;
@@ -516,7 +630,8 @@
     const detour = fenceNavigationTarget(battle, unit, x, z);
     x = detour.x; z = detour.z;
     original.move(battle, unit, x, z);
-    const factor = (FORMATIONS[unit.formation] || FORMATIONS.line).speed * (root.TenkaBattlefield?.movementFactor(battle.layout, { ...unit, x: oldX, z: oldZ }) ?? 1);
+    const factor = (FORMATIONS[unit.formation] || FORMATIONS.line).speed * (root.TenkaBattlefield?.movementFactor(battle.layout, { ...unit, x: oldX, z: oldZ }) ?? 1)
+      * (1 - (unit.fatigue || 0) * .003) * (1 - (unit.suppression || 0) * .0015) * (unit.stance === "charge" ? 1.2 : 1);
     if (factor !== 1) {
       const nextX = oldX + (unit.x - oldX) * factor, nextZ = oldZ + (unit.z - oldZ) * factor;
       if (!blocked(battle, nextX, nextZ, unit.type)) { unit.x = nextX; unit.z = nextZ; }
@@ -533,13 +648,39 @@
       // Even after the garrison is defeated, a surviving fence on the final
       // route to the bailey must be attacked instead of causing a path stall.
       if (unit.order !== "retreat" && obstruction.side !== unit.side) {
-        obstruction.hp = Math.max(0, obstruction.hp - original.damage(battle, unit, obstruction, true));
+        obstruction.hp = Math.max(0, obstruction.hp - damage(battle, unit, obstruction, true));
         unit.fieldworkTarget = obstruction.id;
       }
     }
   }
   function tick(battle) {
     if (battle.phase !== "fighting") return;
+    const before = new Map(battle.units.map((unit) => [unit.id, { x: unit.x, z: unit.z, troops: unit.troops }]));
+    battle._tacticalStep = true;
+    // The same fatigue rules apply to both armies. Opposing captains preserve
+    // a reserve, rest exhausted units out of contact, and brace against cavalry.
+    if (battle.fixedSteps % 16 === 0) for (const unit of battle.units) {
+      if (unit.side === friendly(battle) || !active(unit) || unit.order === "retreat") continue;
+      const enemy = nearestEnemy(battle, unit), distance = enemy ? Math.hypot(enemy.x - unit.x, enemy.z - unit.z) : Infinity;
+      if (unit.aiRestOrder && ((unit.fatigue || 0) <= 28 || distance < 12)) {
+        unit.order = unit.aiRestOrder;
+        unit.stance = "balanced";
+        delete unit.aiRestOrder;
+      } else if (!unit.aiRestOrder && (unit.fatigue || 0) > 68 && distance > 15) {
+        unit.aiRestOrder = unit.order;
+        unit.stance = "rest";
+        unit.order = "hold";
+      }
+      if (unit.aiBraceOrder && (!enemy || enemy.type !== "cavalry" || distance > 15)) {
+        unit.order = unit.aiBraceOrder;
+        unit.stance = "balanced";
+        delete unit.aiBraceOrder;
+      } else if (!unit.aiRestOrder && !unit.aiBraceOrder && unit.type === "ashigaru" && enemy?.type === "cavalry" && distance < 14) {
+        unit.aiBraceOrder = unit.order;
+        unit.stance = "brace";
+        unit.order = "hold";
+      }
+    }
     const fieldworkDamage = new Map();
     for (const unit of battle.units) {
       if (!active(unit) || unit.order === "retreat" || (unit.ambush && !unit.revealed)) continue;
@@ -553,7 +694,7 @@
       }).sort((a, b) => Math.hypot(unit.x - a.x, unit.z - a.z) - Math.hypot(unit.x - b.x, unit.z - b.z));
       if (obstacles.length) {
         const obstacle = obstacles[0];
-        fieldworkDamage.set(obstacle.id, (fieldworkDamage.get(obstacle.id) || 0) + original.damage(battle, unit, obstacle, true));
+        fieldworkDamage.set(obstacle.id, (fieldworkDamage.get(obstacle.id) || 0) + damage(battle, unit, obstacle, true));
         // A unit spends this tick attacking the fence, never simultaneously
         // dealing its full attack to the soldiers protected behind it.
         unit.fieldworkTarget = obstacle.id;
@@ -594,6 +735,35 @@
       unit.targetZ = enemy.z;
     }
     original.tick(battle);
+    delete battle._tacticalStep;
+    for (const unit of battle.units) {
+      const prior = before.get(unit.id);
+      const moved = prior ? Math.hypot(unit.x - prior.x, unit.z - prior.z) : 0;
+      const enemy = nearestEnemy(battle, unit), distance = enemy ? Math.hypot(enemy.x - unit.x, enemy.z - unit.z) : Infinity;
+      const fighting = active(unit) && unit.lastAttackTime === battle.time;
+      const inContact = distance < 11;
+      const resting = unit.stance === "rest" && !inContact;
+      const camp = (battle.fortifications || []).some((item) => item.kind === "camp" && item.side === unit.side && item.hp > 0 && Math.hypot(unit.x - item.x, unit.z - item.z) <= 9);
+      const fatigue = moved * (unit.type === "cavalry" ? .22 : .34) * (unit.stance === "charge" ? 1.45 : 1) + (fighting ? .035 : 0) + (unit.stance === "charge" && moved > .05 ? .18 : 0);
+      const recovery = battle.supply?.[unit.side]?.exhausted ? 0 : resting ? (camp ? 3.8 : 2.8) * STEP : moved < .05 && !fighting && !inContact ? .65 * STEP : 0;
+      unit.fatigue = clamp((unit.fatigue || 0) + fatigue - recovery + (battle.supply?.[unit.side]?.exhausted ? .07 : 0), 0, 100);
+      const losses = prior ? Math.max(0, prior.troops - unit.troops) : 0;
+      const rally = moved < .05 ? resting ? 2.2 : inContact ? .08 : .7 : 0;
+      unit.cohesion = clamp((unit.cohesion ?? 100) + rally * STEP - losses / Math.max(1, unit.maxTroops) * 30 - (unit.stance === "charge" && moved > .05 ? .15 : 0) - ((unit.suppression || 0) > 55 ? .06 : 0), 0, 100);
+      unit.suppression = clamp((unit.suppression || 0) + (unit._incomingPressure || 0) - (resting ? 3.5 : camp ? 1.6 : .65) * STEP, 0, 100);
+      delete unit._incomingPressure;
+      unit.steadyTime = moved > .05 ? 0 : Math.min(2, (unit.steadyTime || 0) + STEP);
+      unit.chargeMomentum = unit.stance === "charge" && moved > .15 ? Math.min(1, (unit.chargeMomentum || 0) + .14) : Math.max(0, (unit.chargeMomentum || 0) - .045);
+      // A stationary unit can turn to meet a visible threat, but cannot erase a
+      // flank instantly. A second attack from the opposite side still exposes it.
+      if (enemy && moved < .05 && distance < Math.max(12, unit.range + 3) && !(unit.ambush && !unit.revealed)) {
+        const facing = facingVector(unit), angle = Math.atan2(facing.z, facing.x), desired = Math.atan2(enemy.z - unit.z, enemy.x - unit.x);
+        const difference = Math.atan2(Math.sin(desired - angle), Math.cos(desired - angle));
+        const turn = clamp(difference, -.12, .12);
+        unit.facingX = Math.cos(angle + turn);
+        unit.facingZ = Math.sin(angle + turn);
+      }
+    }
     for (const unit of battle.units) delete unit.fieldworkTarget;
     for (const structure of battle.fortifications || []) {
       structure.hp = Math.max(0, structure.hp - (fieldworkDamage.get(structure.id) || 0));
@@ -632,6 +802,12 @@
     report.playerWon = battle.winner === friendly(battle);
     report.supplyConsumed = Math.ceil(battle.supply?.[friendly(battle)]?.consumed || 0);
     report.enemySupplyConsumed = Math.ceil(battle.supply?.[friendly(battle) === "attacker" ? "defender" : "attacker"]?.consumed || 0);
+    if (battle.carriedSupply !== undefined) {
+      report.carriedSupply = battle.carriedSupply;
+      report.supplyConsumed = Math.min(battle.carriedSupply, report.supplyConsumed);
+      report.supplyRemaining = Math.max(0, battle.carriedSupply - report.supplyConsumed);
+      report.supplyExhausted = !!battle.supply?.[friendly(battle)]?.exhausted;
+    }
     report.tacticsVersion = 1;
     if (battle.defending) {
       report.message = `${battle.targetCastle.name}の籠城戦は${report.playerWon ? "防衛成功" : "落城"}。守備軍の損失 ${report.enemyCasualties.toLocaleString("ja-JP")}、敵軍の損失 ${report.casualties.toLocaleString("ja-JP")}。兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を消費。`;
@@ -646,10 +822,10 @@
       if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
       const battlefieldVersion = battle.battlefieldVersion ?? 0;
       if (![0, 1, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
-      let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion });
+      let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion, carriedSupply: battle.carriedSupply }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion, carriedSupply: battle.carriedSupply });
       for (const record of battle.ledger) {
-        if (["deploy", "order", "formation", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
-          const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
+        if (["deploy", "order", "formation", "stance", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
+          const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "stance" ? stance(replay, record.command.unitId, record.command.stance) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
           if (!answer.ok) return null;
           replay = answer.battle;
         } else if (record.kind === "start" && replay.phase === "deployment") replay = original.start(replay);
@@ -755,5 +931,5 @@
     installed = { ...core, create, deploy, order, damage, move, tick, result, verify };
     return installed;
   }
-  root.TenkaTactics = Object.freeze({ version: 1, formations: FORMATIONS, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, result, stamp });
+  root.TenkaTactics = Object.freeze({ version: 2, formations: FORMATIONS, stances: STANCES, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, stance, tacticalView, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, result, stamp });
 })(typeof window !== "undefined" ? window : globalThis);

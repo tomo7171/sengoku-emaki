@@ -10,6 +10,21 @@ vm.runInNewContext(fs.readFileSync(require.resolve('../tenka-battle-environment.
 const Environment = context.TenkaBattleEnvironment;
 vm.runInNewContext(fs.readFileSync(require.resolve('../tenka-battlefield.js'), 'utf8'), context);
 const Battlefield = context.TenkaBattlefield;
+test('weather uses consistent daylight and reflective sky while terrain colour noise remains continuous', () => {
+  const clear = Environment.atmosphere('晴'), rain = Environment.atmosphere('雨');
+  assert.ok(clear.sunIntensity > rain.sunIntensity, 'overcast weather reduces direct sunlight');
+  assert.ok(rain.shadowRadius > clear.shadowRadius, 'overcast light softens shadows');
+  assert.notDeepEqual(clear.sky, rain.sky);
+  assert.notEqual(clear.haze, rain.haze);
+  assert.ok([clear, rain].every(light => light.exposure > .7 && light.exposure < 1.3 && light.reflectedIntensity > 0));
+  for (const x of [-299.999, -32, -.001, 0, 1, 54.5, 400]) for (const z of [-300, -.001, 0, 29.99, 400]) {
+    const value = Environment.surfaceNoise(x, z);
+    assert.ok(value >= 0 && value <= 1);
+    assert.equal(value, Environment.surfaceNoise(x, z), 'the same ground has stable colour across views');
+    assert.ok(Math.abs(value - Environment.surfaceNoise(x + .0001, z - .0001)) < .001, 'no grid seam appears at a terrain sample boundary');
+  }
+  assert.equal(Environment.createTexture({}, 'sky'), null, 'headless consumers need no canvas');
+});
 function makeBattle(id, legacy = false, version = 1) {
   const state = Game.newGame(), target = state.castles.find(castle => castle.id === id);
   const source = state.castles.find(castle => target.neighbors.includes(castle.id) && castle.clan !== target.clan) || state.castles.find(castle => castle.id === target.neighbors[0]);
@@ -121,7 +136,8 @@ test('distant hills join the ground outer edge with real depth and a low smooth 
 test('expanded world decorations use the same fields and house footprints as the live battlefield rules', () => {
   const battle = makeBattle('nanao'); Battlefield.apply(battle);
   const before = JSON.stringify(battle), plan = Environment.plan({ battle, heightAt: (x, z) => .18 + Battlefield.elevationDelta(battle.layout, x, z) });
-  assert.equal(plan.ridges.length, 0, 'the old grey background surface cannot cover the expanded playable land');
+  assert.ok(plan.ridges.length > 0);
+  for (const ridge of plan.ridges) for (const point of ridge.points) assert.ok(point.x < plan.bounds.minX || point.x > plan.bounds.maxX || point.z < plan.bounds.minZ || point.z > plan.bounds.maxZ, 'the distant mountain range cannot cover expanded playable land');
   assert.equal(plan.fields.length, battle.layout.landscape.fields.length);
   assert.equal(plan.settlements.length, 3);
   assert.equal(plan.settlements.reduce((sum, item) => sum + item.houses.length, 0), 20);
@@ -144,7 +160,7 @@ test('expanded fields, crops and settlements are finite terrain-following batche
   landscape.group.traverse(object => {
     if (!object.isMesh) return;
     draws++;
-    assert.ok(object.isInstancedMesh || object.name.startsWith('terrain-following-'), 'details are instanced or batched by surface');
+    assert.ok(object.isInstancedMesh || object.name.startsWith('terrain-following-') || object.userData.decorativeOffMap, 'details are instanced or batched by surface');
     const geometry = object.geometry, positions = geometry.attributes.position;
     assert.ok(positions.count > 0 && geometry.attributes.normal.count === positions.count);
     for (const attribute of Object.values(geometry.attributes)) assert.ok(attribute.array.every(Number.isFinite));
@@ -156,6 +172,10 @@ test('expanded fields, crops and settlements are finite terrain-following batche
         const lift = positions.getY(index) - heightAt(positions.getX(index), positions.getZ(index));
         assert.ok(lift > .025 && lift < .17, 'each paddy, bank and canal vertex follows the real uneven ground');
       }
+    }
+    if (object.userData.decorativeOffMap) for (let index = 0; index < positions.count; index++) {
+      const bounds = battle.layout.bounds, x = positions.getX(index), z = positions.getZ(index);
+      assert.ok(x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ, 'decorative ranges never intrude into the authoritative battlefield');
     }
   });
   assert.ok(draws <= 24, `bounded countryside draw calls: ${draws}`);
@@ -193,7 +213,8 @@ test('regional woodland stays spread across near and far terrain without multipl
     assert.equal(item.y, heightAt(item.x, item.z), 'decorations follow regional slopes instead of a common flat surface');
     assert.equal(battle.layout.water.some(water => inside(item.x, item.z, water.polygon)), false);
   }
-  assert.equal(plan.ridges.length, 0);
+  assert.ok(plan.ridges.length > 0);
+  for (const ridge of plan.ridges) for (const point of ridge.points) assert.ok(point.x < plan.bounds.minX || point.x > plan.bounds.maxX || point.z < plan.bounds.minZ || point.z > plan.bounds.maxZ);
 });
 
 test('coastal pines and Ryukyu broadleaves have different actual silhouettes and visible regional stone colours', () => {
@@ -206,7 +227,7 @@ test('coastal pines and Ryukyu broadleaves have different actual silhouettes and
     const scene = new Three.Group(), environment = Environment.create(Three, { battle, scene });
     assert.equal(environment.group.userData.regionalLandscape.id, profile.id);
     assert.equal(environment.stats.regionalProfile, profile.id);
-    const crowns = environment.meshes.find(mesh => mesh.name === 'five-lobed-broadleaf-crowns');
+    const crowns = environment.meshes.find(mesh => mesh.name === (profile.id === 'coast' ? 'spreading-japanese-pine-branches' : 'five-lobed-broadleaf-crowns'));
     const rocks = environment.meshes.find(mesh => mesh.name === 'weathered-rocks-at-woodland-edge');
     const matrix = crowns.instanceMatrix.array;
     const sx = Math.hypot(...matrix.slice(0, 3)), sy = Math.hypot(...matrix.slice(4, 7));

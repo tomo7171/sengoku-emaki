@@ -394,6 +394,9 @@
       const a = officer(s, m.princessId), b = officer(s, m.spouseId);
       if (!alive(a) || !alive(b) || !owned(s, m.fromClan).length || !owned(s, m.toClan).length) { m.active = false; continue; }
       m.active = true;
+      // Breaking a diplomatic pact does not annul an existing marriage. Its
+      // political protection stays suspended until the player negotiates again.
+      if (m.allianceBroken) continue;
       if ([m.fromClan, m.toClan].includes(s.playerClan)) {
         const other = m.fromClan === s.playerClan ? m.toClan : m.fromClan;
         if (!s.alliances.includes(other)) s.alliances.push(other);
@@ -438,9 +441,10 @@
   function marriageTargets(s, princess) {
     return [...new Set(s.castles.map(c => c.clan))].filter(id => id !== s.playerClan).map(id => {
       const f = s.tenka.dynasty.families[id];
-      const people = s.officers.filter(o => atHome(s, o, id) && !female(o) && age(s, o) >= 18 && !o.marriedTo && (!princess || !related(s, princess, o)));
+      const people = s.officers.filter(o => atHome(s, o, id) && o.isKin && !female(o) && age(s, o) >= 18 && !o.marriedTo && (!princess || !related(s, princess, o)));
       const spouse = people.find(o => o.id === f?.heirId) || people.find(o => o.id === f?.headId) || people.find(o => o.isKin);
-      return spouse ? { id, name: clanName(s, id), spouseId: spouse.id, spouseName: spouse.name } : null;
+      return spouse ? { id, name: clanName(s, id), spouseId: spouse.id, spouseName: spouse.name,
+        spouses: people.map(person => ({ id: person.id, name: person.name, age: age(s, person), role: person.id === f?.headId ? '当主' : person.id === f?.heirId ? '世継ぎ' : '一門' })) } : null;
     }).filter(Boolean);
   }
   function act(input, action = {}) {
@@ -520,5 +524,13 @@
       upcoming: upcoming.sort((a, b) => a.year - b.year || a.id.localeCompare(b.id))
     };
   }
-  return { configure, initialize, advance, reconcile, act, getView, age, recordDeath, HISTORICAL };
+  // Candidates depend on the selected princess; a clan-wide suggestion may be
+  // a close relative of her even when another member of that house is eligible.
+  function marriageOptions(input, princessId) {
+    const state = initialize(input), princess = officer(state, princessId);
+    if (!princess || princess.clan !== state.playerClan || !female(princess) || !princess.isKin
+      || !atHome(state, princess, state.playerClan) || age(state, princess) < 18 || princess.marriedTo) return [];
+    return marriageTargets(state, princess);
+  }
+  return { configure, initialize, advance, reconcile, act, getView, marriageOptions, age, recordDeath, HISTORICAL };
 });

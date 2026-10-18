@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('output', type=Path, help='Path of the generated standalone HTML')
 args = parser.parse_args()
 html = (root / 'index.html').read_text(encoding='utf-8')
-for name in ('tenka-portraits.js', 'tenka-castles.js', 'tenka-fortress-materials.js', 'tenka-castle-models.js', 'tenka-castle-precincts.js', 'tenka-battlefield.js', 'tenka-battle-environment.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-orders.js','tenka-retainers.js','tenka-allies.js', 'tenka-ui.js'):
+for name in ('tenka-portraits.js', 'tenka-castles.js', 'tenka-fortress-materials.js', 'tenka-castle-models.js', 'tenka-castle-precincts.js', 'tenka-battlefield.js', 'tenka-battle-environment.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-orders.js','tenka-retainers.js','tenka-allies.js','tenka-diplomacy.js','tenka-transfers.js','tenka-routes.js','tenka-supplies.js', 'tenka-ui.js'):
     content = (root / name).read_text(encoding='utf-8')
     if '</script' in content.lower():
         raise ValueError(f'Unsafe inline script terminator in {name}')
@@ -17,10 +17,11 @@ for name in ('tenka-portraits.js', 'tenka-castles.js', 'tenka-fortress-materials
     if len(tags) != 1:
         raise ValueError(f'Expected exactly one script reference: {name}')
     html = html.replace(tags[0], f'<script>\n{content}\n</script>')
-style_tags = re.findall(r'<link rel="stylesheet" href="tenka-ui\.css(?:\?[^"<>]*)?">', html)
-if len(style_tags) != 1:
-    raise ValueError('Expected exactly one stylesheet reference')
-html = html.replace(style_tags[0], '<style>\n' + (root / 'tenka-ui.css').read_text(encoding='utf-8') + '\n</style>')
+for name in ('tenka-ui.css', 'tenka-routes.css', 'tenka-supplies.css'):
+    style_tags = re.findall(r'<link rel="stylesheet" href="' + re.escape(name) + r'(?:\?[^"<>]*)?">', html)
+    if len(style_tags) != 1:
+        raise ValueError(f'Expected exactly one stylesheet reference: {name}')
+    html = html.replace(style_tags[0], '<style>\n' + (root / name).read_text(encoding='utf-8') + '\n</style>')
 if re.search(r'<script\b[^>]*\bsrc\s*=', html, re.I):
     raise ValueError('A runtime script still requires another file')
 args.output.parent.mkdir(parents=True, exist_ok=True)
