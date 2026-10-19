@@ -58,7 +58,7 @@ test('execution requires a separate explicit confirmation and no orders explain 
  button(tree,'処断を確定する').props.onClick();assert.equal(props.state.officers[1].status,'dead');
  assert.equal(props.state.lastBattle.officerOutcomes[2].outcome,'captured');
  const exhausted={state:fixture(),onState:()=>{}};exhausted.state.actionPoints=0;
- const exhaustedTree=renderer(UI,exhausted).render();assert.equal(button(exhaustedTree,'解放する').props.disabled,true);assert.match(content(exhaustedTree),/次の季節に処遇/);
+ const exhaustedTree=renderer(UI,exhausted).render();assert.equal(button(exhaustedTree,'解放する').props.disabled,true);assert.match(content(exhaustedTree),/次の月に処遇/);
 });
 
 test('legacy and unrecorded reports never claim a later natural death was a battle casualty',()=>{

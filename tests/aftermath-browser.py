@@ -29,7 +29,7 @@ CAPTURE_FIXTURE = """() => {
   state.armies.kiyosu.units={ashigaru:2000,archer:1000,cavalry:1000,firearm:4000,navy:0};
   const clans=[...new Set(state.castles.map(c=>c.clan))];
   state.alliances=clans.filter(id=>!['oda','imagawa'].includes(id));
-  state.allianceExpires=Object.fromEntries(state.alliances.map(id=>[id,state.turn+4]));
+  state.allianceExpires=Object.fromEntries(state.alliances.map(id=>[id,state.turn+12]));
   state.npcPacts=[];
   for(let i=0;i<clans.length;i++)for(let j=i+1;j<clans.length;j++){
     if(clans[i]!=='oda'&&clans[j]!=='oda')state.npcPacts.push([clans[i],clans[j]]);
@@ -190,7 +190,9 @@ def main():
         legacy.goto(args.url, wait_until="domcontentloaded")
         picker(legacy)
         migration = legacy.evaluate("""() => {
-          const Game=window.TenkaGame,s=Game.newGame();s.year=1780;s.turn=881;
+          const Game=window.TenkaGame,s=Game.newGame();
+          // Deliberately model a genuine quarterly save, before the month field existed.
+          delete s.month;delete s.tenka.calendar;s.year=1780;s.season=0;s.turn=881;
           const state=Game.migrate(s),older=state.officers.filter(o=>o.birth<1680);
           const nobunaga=state.officers.find(o=>o.id==='oda_nobunaga');
           return {saved:Game.save(state),older:older.map(o=>({id:o.id,status:o.status,age:window.TenkaDynasty.age(state,o)})),nobunaga};

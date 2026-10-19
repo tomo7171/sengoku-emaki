@@ -15,7 +15,7 @@ function campaign(env) {
   const state = env.Game.newGame();
   // Prevent unrelated strategic attacks in tests of native army organization.
   state.alliances = [...new Set(state.castles.map(item => item.clan))].filter(id => id !== state.playerClan);
-  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 4]));
+  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 12]));
   state.gold = 100000; state.food = 1000000;
   return state;
 }
@@ -77,15 +77,15 @@ test('same-castle, foreign, missing, captive, dead, unborn and underage assignme
   }
 });
 
-test('a seasonal assignment prevents moving its officer; after the season expires stationing remains usable for government', () => {
+test('a monthly assignment prevents moving its officer; after the month expires stationing remains usable for government', () => {
   const env = setup(); let state = campaign(env);
   state.tenka.assignments.oda_nobunaga = { turn: state.turn, type: 'reclaim', target: 'kiyosu' };
   assert.equal(station(env, state).ok, false);
   const view = env.Retainers.getView(state).officers.find(item => item.id === 'oda_nobunaga');
   assert.equal(view.busy, true); assert.equal(view.available, false); assert.match(view.reason, /任務中/);
-  state.turn++; state.season++;
+  Object.assign(state, env.context.TenkaCalendar.nextDate(state));
   const moved = station(env, state); assert.equal(moved.ok, true, moved.message);
-  assert.equal(env.Retainers.getView(moved.state).officers.find(item => item.id === 'oda_nobunaga').available, true, 'stationing alone does not lock an entire season');
+  assert.equal(env.Retainers.getView(moved.state).officers.find(item => item.id === 'oda_nobunaga').available, true, 'stationing alone does not lock an entire month');
   const domestic = env.Systems.act(moved.state, { type: 'reclaim', castleId: 'inuyama', officerId: 'oda_nobunaga' });
   assert.equal(domestic.ok, true, domestic.message);
   assert.equal(env.Orders.remaining(domestic.state, 'kiyosu'), 2);

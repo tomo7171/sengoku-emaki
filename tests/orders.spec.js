@@ -31,7 +31,7 @@ function campaign(env) {
   }
   state.gold = 1000000; state.food = 1000000;
   state.alliances = [...new Set(state.castles.map(item => item.clan))].filter(id => id !== state.playerClan);
-  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 4]));
+  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 12]));
   for (const id of state.alliances) state.relations[id] = 75;
   const model = state.officers.find(item => item.clan === state.playerClan && item.status === 'active');
   for (let index = 0; index < 6; index++) state.officers.push({ ...clone(model), id: `orders-delegate-${index}`, name: `命令試験${index}`, castleId: a.id, birth: 1530, isKin: false });
@@ -70,7 +70,7 @@ test('each castle has three native commands, with no refill from selection or co
   assert.ok(JSON.parse(original).castles.find(item => item.id === a).kokudaka < state.castles.find(item => item.id === a).kokudaka);
 });
 
-test('save/load and legacy migration preserve spent commands; next season refreshes every castle once', () => {
+test('save/load and legacy migration preserve spent commands; next month refreshes every castle once', () => {
   const env = setup(), { Game, Orders } = env;
   let { state, a, b } = campaign(env);
   delete state.tenka.castleOrders; state.actionPoints = 1;
@@ -86,7 +86,7 @@ test('save/load and legacy migration preserve spent commands; next season refres
   assert.equal(next.turn, loaded.turn + 1);
   for (const item of next.castles.filter(item => item.clan === next.playerClan)) assert.equal(Orders.remaining(next, item.id), 3);
   const spent = use(env, next, 'develop', b);
-  assert.equal(Orders.remaining(Game.migrate(Game.migrate(spent)), b), 2, 'migration is not a new season');
+  assert.equal(Orders.remaining(Game.migrate(Game.migrate(spent)), b), 2, 'migration is not a new month');
   assert.equal(Game.validate(spent), true);
 });
 
@@ -137,7 +137,7 @@ test('automatic strategic attacks charge their own source even when a different 
   assert.equal(Orders.remaining(result.state, a), 0); assert.equal(Orders.remaining(result.state, b), 2);
 });
 
-test('a forced defense remains playable with no castle commands and spends no seasonal action', () => {
+test('a forced defense remains playable with no castle commands and spends no monthly action', () => {
   const env = setup(), { Game, Orders, Tactics } = env;
   let state = Game.newGame();
   for (const entry of Object.values(state.tenka.castleOrders.castles)) if (entry.clan === state.playerClan) entry.remaining = 0;
@@ -195,7 +195,7 @@ test('tactical creation reserves no command, settlement charges only its source,
   assert.equal(Game.settle(changed, battle).ok, false, 'changing the castle ledger invalidates its battle stamp');
 });
 
-test('castle ownership transfer cannot refill orders before the next season, and malformed ledgers fail validation', () => {
+test('castle ownership transfer cannot refill orders before the next month, and malformed ledgers fail validation', () => {
   const env = setup(), { Orders, Game } = env;
   let { state, a } = campaign(env);
   state.tenka.castleOrders.castles[a].remaining = 0;
@@ -205,7 +205,7 @@ test('castle ownership transfer cannot refill orders before the next season, and
   lost.castles.find(item => item.id === a).clan = state.playerClan;
   const retaken = Orders.sync(lost);
   assert.equal(Orders.remaining(retaken, a), 0);
-  const advanced = clone(retaken); advanced.turn++; advanced.season++;
+  const advanced = clone(retaken); Object.assign(advanced, env.context.TenkaCalendar.nextDate(advanced));
   assert.equal(Orders.remaining(Orders.sync(advanced), a), 3);
   for (const malformed of [4, -1, 1.5, '3']) {
     const invalid = clone(state); invalid.tenka.castleOrders.castles[a].remaining = malformed;

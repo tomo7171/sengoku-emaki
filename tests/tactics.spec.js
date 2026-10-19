@@ -17,7 +17,7 @@ assert.ok(render, 'find the application render without replacing game rules');
 script = script.slice(0, render.index) + '})();';
 const context = vm.createContext({ console, setTimeout, clearTimeout, performance, URL });
 context.window = context;
-for (const filename of ['tenka-portraits.js', 'tenka-castles.js', 'tenka-battlefield.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-orders.js', 'tenka-retainers.js', 'tenka-allies.js','tenka-diplomacy.js','tenka-transfers.js','tenka-routes.js','tenka-supplies.js', 'tenka-ui.js']) {
+for (const filename of ['tenka-calendar.js','tenka-turn-ui.js','tenka-portraits.js', 'tenka-castles.js', 'tenka-battlefield.js', 'tenka-systems.js', 'tenka-dynasty.js', 'tenka-tactics.js', 'tenka-orders.js', 'tenka-retainers.js', 'tenka-allies.js','tenka-diplomacy.js','tenka-transfers.js','tenka-routes.js','tenka-supplies.js', 'tenka-ui.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, filename), 'utf8'), context, { filename });
 }
 vm.runInContext(script, context, { filename: 'index.inline.js' });

@@ -10,12 +10,20 @@ function persist(Game,state){
 function clearCommands(state,id){for(const army of Object.values(state.armies))if(army.commanderId===id)army.commanderId=null;}
 function peace(state){
  const clans=[...new Set(state.castles.map(c=>c.clan))];
- state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+4]));
+ state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+(Number.isInteger(state.month)?12:4)]));
  state.relations=Object.fromEntries(state.alliances.map(c=>[c,90]));
  state.npcPacts=[];for(let i=0;i<clans.length;i++)for(let j=i+1;j<clans.length;j++)if(clans[i]!==state.playerClan&&clans[j]!==state.playerClan)state.npcPacts.push([clans[i],clans[j]]);
  return state;
 }
-function toYear(Game,state,year){while(state.year<year){state=Game.season(peace(state)).state;assert.equal(Game.validate(state),true,'year '+state.year+' turn '+state.turn);}return state;}
+function toYear(Game,state,year){
+ const limit=(year-state.year+1)*12;
+ for(let months=0;state.year<year&&months<limit;months++){
+  const previousTurn=state.turn,result=Game.season(peace(state));state=result.state;
+  assert.ok(state.turn>previousTurn,'calendar must advance: '+result.message);
+  assert.equal(Game.validate(state),true,'year '+state.year+' month '+state.month+' turn '+state.turn);
+ }
+ assert.equal(state.year,year,'historical-year fixture reaches its intended year');return state;
+}
 
 test('old saves with no dynasty migrate without reviving dead retainers or losing estate progress',()=>{
  const {Game}=runtime();const old=Game.newGame();
@@ -67,7 +75,7 @@ test('a dynamically recruited officer commands a real battle whose result remain
  const loaded=persist(Game,settled.state);assert.equal(loaded.lastBattle.attackerArmy.commanderId,candidate.id);
 });
 
-test('historical births, coming of age and both sexes continue through thirty years of real seasonal saves',()=>{
+test('historical births, coming of age and both sexes continue through thirty years of real monthly saves',()=>{
  const {Game,Dynasty}=runtime();let state=toYear(Game,Game.newGame(),1577);state=persist(Game,state);
  assert.equal(state.officers.find(o=>o.id==='oda_nobutada').status,'active');
  assert.equal(state.officers.find(o=>o.id==='date_masamune').birth,1567);
@@ -77,7 +85,7 @@ test('historical births, coming of age and both sexes continue through thirty ye
  let married=Dynasty.act(state,{type:'marry',princessId:princess.id,targetClan:partner.id,spouseId:partner.spouseId});assert.equal(married.ok,true,married.message);
  state=persist(Game,married.state);assert.equal(state.officers.find(o=>o.id===princess.id).marriedTo,partner.spouseId);
  // Remove unrelated peace pacts to verify the marriage itself renews its alliance.
- for(let i=0;i<9;i++){state=Game.season(peace(state)).state;assert.ok(state.alliances.includes(partner.id));assert.equal(state.allianceExpires[partner.id],state.turn+4);state=persist(Game,state);}
+ for(let i=0;i<9;i++){state=Game.season(peace(state)).state;assert.ok(state.alliances.includes(partner.id));assert.equal(state.allianceExpires[partner.id],state.turn+12);state=persist(Game,state);}
  state=toYear(Game,state,1590);state=persist(Game,state);
  const born=state.officers.filter(o=>o.origin==='fictional'&&o.fatherId&&o.clan==='oda');
  assert.ok(born.some(o=>o.gender==='male'));assert.ok(born.some(o=>o.gender==='female'));
@@ -88,6 +96,7 @@ test('historical births, coming of age and both sexes continue through thirty ye
 test('a legacy campaign two centuries later reloads with finite lifespans and can recruit a new head',()=>{
  const {Game,Dynasty}=runtime();let state=Game.newGame();
  state.year=1770;state.season=0;state.turn=841;state.gold=4321;
+ delete state.month;delete state.tenka.calendar;
  state.tenka.estates.kiyosu.commerce=9;
  assert.equal(Game.validate(state),true,'the legacy age problem is accepted by the original save shape');
  state=persist(Game,state);
@@ -103,12 +112,12 @@ test('a legacy campaign two centuries later reloads with finite lifespans and ca
  state=persist(Game,hired.state);assert.ok(Dynasty.getView(state).family.head);
 });
 
-test('real seasonal natural mortality preserves designated succession and retainer children through saves',()=>{
+test('real monthly natural mortality preserves designated succession and retainer children through saves',()=>{
  const {Game,Dynasty}=runtime();let state=Game.newGame();
- state.year=1584;state.season=0;state.turn=97;
+ state.year=1584;state.month=5;state.season=0;state.turn=291;
  state=Game.migrate(state);
  const result=Dynasty.act(state,{type:'appointHeir',targetOfficerId:'oda_nobutada'});assert.equal(result.ok,true);state=result.state;
- const head=state.officers.find(o=>o.id==='oda_nobunaga');head.naturalDeathAge=50;head.naturalDeathSeason=1;
+ const head=state.officers.find(o=>o.id==='oda_nobunaga');head.naturalDeathAge=50;head.naturalDeathSeason=1;head.naturalDeathMonth=6;
  state=Game.season(peace(state)).state;state=persist(Game,state);
  const deceased=state.officers.find(o=>o.id===head.id);assert.equal(deceased.status,'dead');assert.equal(deceased.deathCause,'natural');assert.equal(deceased.diedAtAge,50);
  assert.equal(Dynasty.getView(state).family.head.id,'oda_nobutada');

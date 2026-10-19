@@ -15,14 +15,14 @@ function setup() {
 }
 function campaign(env, year = 1560) {
   let state = env.Game.newGame();
-  state.year = year; state.season = 0; state.turn = (year - 1560) * 4 + 1;
+  state.year = year; state.month = 3; state.season = 0; state.turn = (year - 1560) * 12 + 1;
   state.gold = 100000; state.food = 1000000; state.prestige = 90;
   state = env.Game.migrate(state);
   // Test diplomatic choices without unrelated wars. The engine still runs its
-  // actual seasonal income, dynasty, native validation and save/load routines.
+  // actual monthly income, dynasty, native validation and save/load routines.
   const clans = [...new Set(state.castles.map(item => item.clan))];
   state.npcPacts = clans.flatMap((first, index) => clans.slice(index + 1).map(second => [first, second]));
-  state.alliances = ['matsudaira']; state.allianceExpires = { matsudaira: state.turn + 4 }; state.relations.matsudaira = 85;
+  state.alliances = ['matsudaira']; state.allianceExpires = { matsudaira: state.turn + 12 }; state.relations.matsudaira = 85;
   return env.Diplomacy.initialize(state);
 }
 function marriageAction(env, state, princessId = 'oda_tokuhime') {
@@ -97,7 +97,7 @@ test('alliance breaking requires confirmation, updates real war protection, and 
   assert.equal(result.state.relations.matsudaira, married.relations.matsudaira - 40); assert.equal(result.state.prestige, married.prestige - 10);
   assert.equal(env.Orders.remaining(result.state, 'kiyosu'), 2); assert.equal(result.state.alliances.includes('matsudaira'), false);
   const next = env.Game.season(result.state).state;
-  assert.equal(next.alliances.includes('matsudaira'), false, 'seasonal Dynasty.renewMarriages must respect broken protection');
+  assert.equal(next.alliances.includes('matsudaira'), false, 'monthly Dynasty.renewMarriages must respect broken protection');
   assert.equal(next.tenka.dynasty.marriages[0].active, true, 'diplomacy does not erase the actual family marriage');
   assert.equal(next.tenka.dynasty.marriages[0].allianceBroken, true);
   assert.equal(env.Diplomacy.isProtectedPair(next, 'oda', 'matsudaira'), false);
@@ -140,10 +140,10 @@ test('native map targets and NPC invasion use current diplomatic protection in b
   assert.equal(released.state.castles.find(item => item.id === released.state.pendingDefense.sourceId).clan, 'saito');
 });
 
-test('vassal tribute transfers actual stores once a season, survives reload, and stops when the pact is ended', () => {
+test('vassal tribute transfers actual stores once a month, survives reload, and stops when the pact is ended', () => {
   const env = setup(), { result } = weakNeighbor(env), initial = result.state;
   const same = env.Diplomacy.advance(initial); assert.equal(same.gold, initial.gold); assert.equal(same.food, initial.food);
-  const due = clone(initial); due.turn++; due.season = 1;
+  const due = clone(initial); Object.assign(due, env.context.TenkaCalendar.nextDate(due));
   const stores = state => ['gold', 'food'].map(key => state[key] + state.castles.reduce((sum, home) => sum + home[key], 0));
   const conserved = env.Diplomacy.advance(due);
   assert.deepEqual(stores(conserved), stores(due), 'tribute transfers existing resources instead of creating income');
@@ -152,7 +152,7 @@ test('vassal tribute transfers actual stores once a season, survives reload, and
   assert.equal(next.logs.filter(item => item.title === '恭順国からの貢納').length, 1);
   const again = env.Diplomacy.advance(next); assert.equal(again.gold, next.gold); assert.equal(again.food, next.food);
   assert.equal(env.Game.save(next), true); const loaded = env.Game.load();
-  assert.equal(env.Diplomacy.advance(loaded).gold, loaded.gold, 'save/load cannot collect the same season twice');
+  assert.equal(env.Diplomacy.advance(loaded).gold, loaded.gold, 'save/load cannot collect the same month twice');
   const released = env.Diplomacy.act(loaded, { type: 'breakAlliance', targetClan: 'saito', orderCastleId: 'kiyosu', confirm: true });
   assert.equal(released.ok, true, released.message); assert.equal(released.state.tenka.diplomacy.vassals.saito.active, false);
   assert.equal(env.Diplomacy.isProtectedPair(released.state, 'oda', 'saito'), false);
@@ -177,7 +177,7 @@ test('a refused submission spends the real envoy budget once and cannot be retri
   assert.equal(attempt.state.tenka.diplomacy.vassals.saito, undefined);
   const other = env.Diplomacy.getView(attempt.state).delegates.find(item => item.available);
   const repeat = env.Diplomacy.act(attempt.state, { ...action, officerId: other.id });
-  assert.equal(repeat.ok, false); assert.match(repeat.message, /今季すでに/); assert.equal(repeat.state, attempt.state);
+  assert.equal(repeat.ok, false); assert.match(repeat.message, /今月すでに/); assert.equal(repeat.state, attempt.state);
   assert.equal(env.Game.validate(attempt.state), true); assert.equal(env.Game.save(attempt.state), true);
   assert.equal(env.Diplomacy.act(env.Game.load(), { ...action, officerId: other.id }).ok, false);
 });
@@ -218,7 +218,7 @@ test('an old protected invasion alert migrates once without charging either army
   const env = setup(), state = campaign(env);
   const clans = [...new Set(state.castles.map(item => item.clan))];
   state.alliances = clans.filter(id => id !== state.playerClan);
-  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 4]));
+  state.allianceExpires = Object.fromEntries(state.alliances.map(id => [id, state.turn + 12]));
   state.pendingDefense = { sourceId: 'inabayama', targetId: 'inuyama', mode: 'siege', clan: 'saito' };
   state.threats = [{ sourceId: 'inabayama', targetId: 'inuyama', text: '旧セーブの急報' }];
   delete state.tenka.diplomacy;

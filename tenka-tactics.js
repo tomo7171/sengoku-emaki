@@ -2,6 +2,20 @@
   "use strict";
   const TYPES = ["ashigaru", "archer", "cavalry", "firearm", "navy"];
   const STEP = 0.25;
+  // A battle turn resolves eight tactical seconds. The campaign month is a
+  // separate clock: no browser frame or idle timer advances these turns.
+  const TURN_STEPS = 32;
+  // One deliberate attack/volley is shorter than the full movement turn.
+  // Resolving an entire turn as uninterrupted fire made equal armies lose
+  // most soldiers before the player could react to the first exchange.
+  const TURN_ATTACK_SCALE = 8;
+  const TURN_RULES = Object.freeze({
+    ashigaru: Object.freeze({ name: "足軽", movement: 10, range: 2.5, attack: 1, defense: 1.15 }),
+    archer: Object.freeze({ name: "弓", movement: 9, range: 18, attack: 1, defense: .9 }),
+    cavalry: Object.freeze({ name: "騎馬", movement: 18, range: 3.5, attack: 1.2, defense: 1 }),
+    firearm: Object.freeze({ name: "鉄砲", movement: 7, range: 22, attack: 1.2, defense: .85 }),
+    navy: Object.freeze({ name: "水軍", movement: 15, range: 24, attack: 1.1, defense: 1.1 }),
+  });
   const FORMATIONS = Object.freeze({
     line: { name: "横陣", attack: 1, ranged: 1.12, defense: 1, speed: 1, description: "射界を広く取り、弓・鉄砲の斉射を重視" },
     wedge: { name: "魚鱗", attack: 1.2, ranged: 0.9, defense: 0.88, speed: 1.12, description: "突破と突撃を重視。側面と射撃に弱い" },
@@ -326,13 +340,193 @@
     if (regionalRules(battle)) adaptDeployments(battle);
     return battle;
   }
+  function prepareTurns(battle, state) {
+    battle.controlMode = "turns";
+    battle.turnVersion = 1;
+    battle.turnNumber = 1;
+    battle.turnHistory = [];
+    const side = friendly(battle), home = battle.defending ? battle.targetCastle : battle.sourceCastle;
+    battle.friendlyOfficers = battle.friendlyOfficers.filter(officer => officer.status === "active"
+      && officer.castleId === home.id && (officer.currentYear ?? state.year) - officer.birth >= 15);
+    // Both sides use a whole troop-type contingent, not anonymous six-hundred
+    // copies. Identical movement/attack budgets then apply to both armies.
+    const groups = new Map();
+    for (const unit of battle.units) {
+      const key = `${unit.side}:${unit.supportId || "principal"}:${unit.type}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(unit);
+    }
+    const enemyOfficers = (side === "attacker" ? battle.defenderOfficers : battle.eligibleOfficers)
+      .filter(officer => officer.status === "active" && (officer.currentYear ?? state.year) - officer.birth >= 15);
+    let enemyIndex = 0;
+    battle.units = [...groups.values()].map(same => {
+      const unit = copy(same[0]);
+      unit.troops = same.reduce((total, item) => total + item.troops, 0);
+      unit.maxTroops = unit.troops;
+      if (unit.side === side && !unit.foreignSupport) {
+        unit.commanderId = null;
+        unit.commanderName = "武将未指定";
+      } else {
+        const officers = unit.foreignSupport ? state.officers.filter(officer => officer.status === "active"
+          && officer.clan === unit.supportClan && state.year - officer.birth >= 15) : enemyOfficers;
+        const commander = officers[(unit.foreignSupport ? TYPES.indexOf(unit.type) : enemyIndex++) % Math.max(1, officers.length)];
+        unit.commanderId = commander?.id || null;
+        unit.commanderName = commander?.name || unit.supportName || (unit.side === "attacker" ? battle.sourceCastle.name : battle.targetCastle.name) + "守備軍";
+        if (unit.foreignSupport && commander && !battle.eligibleOfficers.some(officer => officer.id === commander.id)
+          && !battle.defenderOfficers.some(officer => officer.id === commander.id)) battle.eligibleOfficers.push(copy(commander));
+      }
+      if (unit.side === side) {
+        unit.deployedConfirmed = false;
+        unit.order = "hold";
+        unit.turnPlan = { action: "wait", move: null, targetId: null };
+      }
+      return unit;
+    });
+    event(battle, "各部隊の指揮武将と配置を決めてください。開戦後は命令を計画し、『このターンを実行』で両軍が行動します。");
+    return battle;
+  }
+  function deploymentStatus(battle) {
+    const units = battle.units.filter(unit => unit.side === friendly(battle) && unit.troops > 0);
+    const officers = battle.friendlyOfficers || [];
+    const primary = units.filter(unit => !unit.foreignSupport);
+    const unplaced = units.filter(unit => !unit.deployedConfirmed).map(unit => unit.id);
+    const unassigned = primary.filter(unit => !officers.some(officer => officer.id === unit.commanderId)).map(unit => unit.id);
+    const used = new Set(), duplicate = [];
+    for (const unit of primary) if (unit.commanderId) {
+      if (used.has(unit.commanderId)) duplicate.push(unit.id);
+      used.add(unit.commanderId);
+    }
+    const ready = units.length > 0 && !unplaced.length && !unassigned.length && !duplicate.length;
+    const message = !units.length ? "一部隊以上の兵を出陣させてください。" : unassigned.length || duplicate.length
+      ? `各兵科に出陣元の城の武将を一人ずつ指定してください（未指定${unassigned.length}隊）。不足する場合は城へ武将を配属するか、出陣兵科を減らしてください。`
+      : unplaced.length ? `全隊を地図上で配置するか、現在の位置を確定してください（未確定${unplaced.length}隊）。` : "全隊の指揮武将と配置を確認しました。開戦できます。";
+    return { ready, units, officers, unplaced, unassigned, duplicate, message };
+  }
+  function assignCommander(battle, unitId, commanderId) {
+    return deploy(battle, { unitId, commanderId, confirmPosition: false });
+  }
+  function confirmDeployment(battle, unitId) {
+    return deploy(battle, { unitId, confirmPosition: true });
+  }
+  function start(battle) {
+    if (battle.phase !== "deployment") return battle;
+    if (battle.controlMode === "turns") {
+      const status = deploymentStatus(battle);
+      if (!status.ready) return { ...battle, deploymentError: status.message };
+    }
+    const next = original.start(battle);
+    if (battle.controlMode === "turns") {
+      delete next.deploymentError;
+      for (const unit of next.units.filter(item => item.side === friendly(next))) {
+        unit.order = "hold";
+        unit.turnPlan = { action: "wait", move: null, targetId: null };
+      }
+      event(next, "第一ターンの命令を選んでください。命令のない部隊は待機し、自動で進撃しません。");
+    }
+    return next;
+  }
+  function movementBudget(battle, unit) {
+    const base = TURN_RULES[unit.type], terrain = root.TenkaBattlefield?.movementFactor(battle.layout, unit) ?? 1;
+    return Math.round(base.movement * (FORMATIONS[unit.formation] || FORMATIONS.line).speed
+      * terrain * (1 - (unit.fatigue || 0) * .003) * 10) / 10;
+  }
+  function turnView(battle, unitId = null) {
+    const units = battle.units.filter(unit => unit.side === friendly(battle) && active(unit)).map(unit => {
+      const base = TURN_RULES[unit.type], movement = movementBudget(battle, unit);
+      return { id: unit.id, commanderName: unit.commanderName, type: unit.type, ...base,
+        movement: Math.round(movement * 10) / 10, action: unit.turnPlan?.action || "wait",
+        plannedMove: unit.turnPlan?.move || null, targetId: unit.turnPlan?.targetId || null,
+        plan: copy(unit.turnPlan || { action: "wait", move: null, targetId: null }) };
+    });
+    return { number: battle.turnNumber || 1, units, selected: units.find(unit => unit.id === unitId) || null,
+      secondsPerTurn: TURN_STEPS * STEP, rules: TURN_RULES };
+  }
+  function turnOrder(battle, command) {
+    if (battle.phase !== "fighting") return reject(battle, "命令の計画は開戦後に行ってください。");
+    const unit = battle.units.find(item => item.id === command.unitId && item.side === friendly(battle) && active(item));
+    const action = command.order === "hold" ? "defend" : command.order;
+    if (!unit || !["move", "attack", "defend", "wait", "retreat"].includes(action)) return reject(battle, "自軍部隊を選び、移動・攻撃・防御・待機を指定してください。");
+    const plan = copy(unit.turnPlan || { action: "wait", move: null, targetId: null });
+    if (action === "move") {
+      const { x, z } = command, box = bounds(battle);
+      if (![x, z].every(Number.isFinite) || x < box.minX + 1 || x > box.maxX - 1 || z < box.minZ + 1 || z > box.maxZ - 1) return reject(battle, "戦場内の移動先を指定してください。");
+      const movement = turnView(battle, unit.id).selected.movement;
+      if (Math.hypot(x - unit.x, z - unit.z) > movement + .05) return reject(battle, `この部隊は一ターンに${movement}まで移動できます。近い場所を指定してください。`);
+      if (blocked(battle, x, z, unit.type)) return reject(battle, "川・堀・城壁・柵・建物を避けて移動先を指定してください。");
+      plan.move = { x, z };
+    } else if (action === "attack") {
+      const target = battle.units.find(item => item.id === command.targetId && item.side !== unit.side && active(item))
+        || (unit.side === "attacker" && battle.structures.find(item => item.id === command.targetId && item.hp > 0))
+        || (battle.fortifications || []).find(item => item.id === command.targetId && item.side !== unit.side && item.hp > 0);
+      if (!target) return reject(battle, "攻撃する敵部隊・城門・敵の施設を選んでください。");
+      const from = plan.move || unit, reach = unit.range + (Number.isFinite(target.troops) ? 0 : Math.max(target.w ?? target.width ?? 0, target.d ?? target.depth ?? 0) / 2);
+      if (Math.hypot(from.x - target.x, from.z - target.z) > reach + .1) return reject(battle, `攻撃目標が射程外です。先に移動を計画してください（射程${unit.range}）。`);
+      plan.action = "attack"; plan.targetId = target.id;
+    } else {
+      plan.action = action; plan.targetId = null;
+      if (["wait", "defend", "retreat"].includes(action)) plan.move = null;
+    }
+    const next = copy(battle);
+    next.units.find(item => item.id === unit.id).turnPlan = plan;
+    next.ledger.push({ kind: "turn-order", command: { unitId: unit.id, order: action, ...(action === "move" ? { x: command.x, z: command.z } : {}), ...(action === "attack" ? { targetId: command.targetId } : {}) } });
+    return { ok: true, battle: next, message: "このターンの命令を設定しました。『このターンを実行』まで両軍は動きません。" };
+  }
+  function endTurn(battle) {
+    if (battle.controlMode !== "turns" || battle.phase !== "fighting") return reject(battle, "ターン制の合戦中だけ実行できます。");
+    const next = copy(battle), side = friendly(next);
+    next._turnExecuting = true;
+    for (const unit of next.units.filter(item => item.side === side && active(item))) {
+      const plan = unit.turnPlan || { action: "wait", move: null, targetId: null };
+      unit._turnMovement = movementBudget(next, unit);
+      unit._turnAttackSpent = false;
+      unit.order = plan.action === "retreat" ? "retreat" : plan.move ? "move" : "hold";
+      unit.targetX = plan.move?.x ?? unit.x; unit.targetZ = plan.move?.z ?? unit.z;
+      unit.targetId = plan.action === "attack" ? plan.targetId : null;
+      unit.stance = plan.action === "defend" ? "brace" : plan.action === "wait" && !plan.move ? "rest" : unit.stance === "charge" ? "charge" : "balanced";
+    }
+    for (const unit of next.units.filter(item => item.side !== side && active(item))) {
+      unit._turnMovement = movementBudget(next, unit);
+      unit._turnAttackSpent = false;
+    }
+    for (let index = 0; index < TURN_STEPS && next.phase === "fighting"; index++) tick(next);
+    delete next._turnExecuting;
+    for (const unit of next.units) {
+      delete unit._turnMovement; delete unit._turnAttackSpent;
+      if (unit.side !== side) continue;
+      unit.turnPlan = { action: unit.order === "retreat" || unit.status === "retreating" ? "retreat" : "wait", move: null, targetId: null };
+      if (active(unit) && unit.order !== "retreat") { unit.order = "hold"; unit.targetId = null; unit.targetX = unit.x; unit.targetZ = unit.z; }
+    }
+    next.turnHistory.push({ number: next.turnNumber, time: next.time });
+    next.turnNumber++;
+    next.ledger.push({ kind: "turn-end" });
+    event(next, next.phase === "finished" ? "合戦の決着がつきました。戦果を確認してください。" : `第${next.turnNumber}ターン。命令を選び、全隊の計画を確認してから実行してください。`);
+    return { ok: true, battle: next, message: next.phase === "finished" ? "合戦が終了しました。" : `第${next.turnNumber}ターンの命令を設定してください。` };
+  }
+  function withdrawBattle(battle) {
+    if (battle.controlMode !== "turns" || battle.phase !== "fighting") return reject(battle, "合戦中だけ全軍撤退できます。");
+    let next = battle;
+    for (const unit of battle.units.filter(item => item.side === friendly(battle) && active(item))) {
+      const answer = turnOrder(next, { unitId: unit.id, order: "retreat" });
+      if (!answer.ok) return answer;
+      next = answer.battle;
+    }
+    // An explicit all-army retreat authorizes its resolution, including the
+    // pursuing enemy's response and food use. Every turn is still replayed.
+    for (let index = 0; index < 200 && next.phase === "fighting"; index++) {
+      const answer = endTurn(next);
+      if (!answer.ok) return answer;
+      next = answer.battle;
+    }
+    return { ok: next.phase === "finished", battle: next, message: next.phase === "finished" ? "全軍の撤退を確認しました。戦果と帰還兵を確認してください。" : "撤退中です。次のターンを実行してください。" };
+  }
   function create(options) {
     const available = Math.max(0, options.state.food - 600);
     if (options.carriedSupply !== undefined && (!Number.isSafeInteger(options.carriedSupply) || options.carriedSupply < 0 || options.carriedSupply > available)) throw Error("持ち込む兵糧は、出陣費六百を差し引いた在庫以内の整数で指定してください。");
     const battle = original.create(options);
     addAlliedSupport(battle, options.state);
     if (options.carriedSupply !== undefined) battle.carriedSupply = options.carriedSupply;
-    return prepare(battle, { attackerFood: options.carriedSupply ?? available, defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
+    const prepared = prepare(battle, { attackerFood: options.carriedSupply ?? available, defenderFood: battle.targetCastle.food || 0, battlefieldVersion: options.battlefieldVersion });
+    return options.controlMode === "turns" ? prepareTurns(prepared, options.state) : prepared;
   }
   function createDefense(state, threat = state.pendingDefense, options = {}) {
     if (!original || !threat) throw Error("迎撃する侵攻軍が見つかりません。");
@@ -353,7 +547,8 @@
     battle.id = `tactical-defense-${battle.stateStamp}-${source.id}-${target.id}-${battle.mode}`;
     if (options.carriedSupply !== undefined) battle.carriedSupply = options.carriedSupply;
     addAlliedSupport(battle, state, true);
-    return prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: options.carriedSupply ?? state.food, battlefieldVersion: options.battlefieldVersion });
+    const prepared = prepare(battle, { defending: true, attackerFood: Math.max(0, (source.food || 0) - 600), defenderFood: options.carriedSupply ?? state.food, battlefieldVersion: options.battlefieldVersion });
+    return options.controlMode === "turns" ? prepareTurns(prepared, state) : prepared;
   }
   function deploy(battle, command = {}) {
     if (battle.phase !== "deployment") return reject(battle, "配置を変えられるのは開戦前だけです。");
@@ -363,25 +558,31 @@
     if (unit.foreignSupport && (type !== unit.type || troops !== unit.maxTroops || (Object.hasOwn(command, "commanderId") && command.commanderId != null))) return reject(battle, "同盟軍の兵科・兵数・指揮官は変更できません。配置と戦場での命令を指示してください。");
     const zone = deploymentZone(battle, side);
     if (!Number.isFinite(x) || !Number.isFinite(z) || x < zone.xMin || x > zone.xMax || z < zone.zMin || z > zone.zMax) return reject(battle, side === "defender" ? "守備軍は城側（z -5以下）の陸地・曲輪へ配置してください。" : "攻撃軍は手前側（z 10以上）へ配置してください。");
-    if (!TYPES.includes(type) || !Number.isInteger(troops) || troops < 0 || troops > 600) return reject(battle, "一部隊は五兵科から選び、兵数は零から六百の整数にしてください。");
+    if (!TYPES.includes(type) || !Number.isInteger(troops) || troops < 0 || (battle.controlMode !== "turns" && troops > 600)) return reject(battle, "一部隊は五兵科から選び、兵数は零から六百の整数にしてください。");
     const home = side === "defender" ? battle.targetCastle : battle.sourceCastle;
     if (type === "navy" && (!home.coastal || !battle.coastal)) return reject(battle, "水軍は沿岸拠点の海上へ配置してください。");
     if (blocked(battle, x, z, type)) return reject(battle, "堀・川・海・城壁・木柵・町や村の家屋を避け、水軍は海上へ配置してください。");
     if (troops > 0 && (battle.fortifications || []).some((item) => item.kind === "palisade" && fortificationContains(item, x, z, 0.8))) return reject(battle, "木柵の上には配置できません。柵の後ろへ部隊を配置してください。");
     const others = battle.units.filter((item) => item.side === side && item.id !== unit.id && !item.foreignSupport);
     if (!unit.foreignSupport && (others.filter((item) => item.type === type).reduce((total, item) => total + item.troops, 0) + troops > battle.availableUnits[type] || others.reduce((total, item) => total + item.troops, 0) + troops > battle.availableTroops)) return reject(battle, "出陣できる兵科別の兵数を超えています。");
-    const commanderId = Object.hasOwn(command, "commanderId") ? command.commanderId : unit.commanderId;
+    const commanderId = unit.foreignSupport ? unit.commanderId : Object.hasOwn(command, "commanderId") ? command.commanderId : unit.commanderId;
     const officers = battle.friendlyOfficers || (side === "defender" ? battle.defenderOfficers : battle.eligibleOfficers);
-    const commander = commanderId ? officers.find((officer) => officer.id === commanderId) : null;
-    if (commanderId && (!commander || others.some((item) => item.commanderId === commanderId))) return reject(battle, "活動中の自家武将を、一人につき一部隊に配置してください。");
+    const commander = unit.foreignSupport ? { id: unit.commanderId, name: unit.commanderName } : commanderId ? officers.find((officer) => officer.id === commanderId) : null;
+    if (!unit.foreignSupport && commanderId && (!commander || others.some((item) => item.troops > 0 && item.commanderId === commanderId))) return reject(battle, "活動中の自家武将を、一人につき一部隊に配置してください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unit.id);
+    const positionRequested = command.confirmPosition !== false && (command.confirmPosition === true || Object.hasOwn(command, "x") || Object.hasOwn(command, "z"));
     const ranges = { ashigaru: 2.5, archer: 18, cavalry: 3.5, firearm: 22, navy: 24 };
-    Object.assign(selected, { x, z, targetX: x, targetZ: z, type, troops, maxTroops: troops, commanderId: commanderId || null, commanderName: unit.foreignSupport ? unit.commanderName : commander?.name || "組頭", range: ranges[type] });
+    Object.assign(selected, { x, z, targetX: x, targetZ: z, type, troops, maxTroops: troops, commanderId: commanderId || null, commanderName: unit.foreignSupport ? unit.commanderName : commander?.name || (battle.controlMode === "turns" ? "武将未指定" : "組頭"), range: ranges[type] });
+    if (battle.controlMode === "turns") {
+      selected.deployedConfirmed = troops > 0 && (positionRequested || !!unit.deployedConfirmed);
+      if (!troops && !unit.foreignSupport) { selected.commanderId = null; selected.commanderName = "武将未指定"; }
+    }
     if (selected.ambush && !canAmbush(result, selected)) { selected.ambush = false; selected.revealed = true; }
-    result.ledger.push({ kind: "deploy", command: { unitId: unit.id, x, z, type, troops, commanderId: commanderId || null } });
+    result.ledger.push({ kind: "deploy", command: { unitId: unit.id, x, z, type, troops, commanderId: unit.foreignSupport ? null : commanderId || null, ...(battle.controlMode === "turns" ? { confirmPosition: positionRequested } : {}) } });
     return { battle: result, ok: true, message: "部隊の配置を変更しました。" };
   }
   function order(battle, command = {}) {
+    if (battle.controlMode === "turns") return turnOrder(battle, command);
     if (command.order === "ambush") return ambush(battle, command.unitId);
     if (command.order === "rest" || command.order === "charge") return stance(battle, command.unitId, command.order);
     if (battle.phase !== "fighting") return reject(battle, "命令を出せるのは合戦中だけです。");
@@ -418,6 +619,9 @@
     if (!unit) return reject(battle, "活動中の自軍部隊を選んでください。");
     const result = copy(battle), selected = result.units.find((item) => item.id === unitId);
     selected.stance = value;
+    if (battle.controlMode === "turns" && ["brace", "rest"].includes(value)) {
+      selected.turnPlan = { action: value === "brace" ? "defend" : "wait", move: null, targetId: null };
+    }
     if (["brace", "rest"].includes(value)) {
       selected.order = "hold";
       selected.targetId = null;
@@ -499,6 +703,13 @@
     return { version: 1, units, selected: units.find((unit) => unit.id === unitId) || null, principles: ["射手の射線を開き、槍隊で守り、騎馬で側背面を突くと有利です。", "強行と陣形変更の連続は隊列を乱します。予備隊を残して交代・休息してください。", "迎撃は正面の突撃に強く、散開は射撃に強い一方、接近戦では崩れやすくなります。"] };
   }
   function damage(battle, attacker, target, structure) {
+    if (battle.controlMode === "turns" && (!battle._turnExecuting || attacker._turnAttackSpent)) return 0;
+    if (battle.controlMode === "turns" && attacker.side === friendly(battle)) {
+      // The native proximity targeting must never turn a wait/move/defend
+      // instruction into an autonomous attack, or substitute another target.
+      if (!battle._turnExecuting || attacker.turnPlan?.action !== "attack" || attacker._turnAttackSpent
+        || attacker.turnPlan.targetId !== target.id) return 0;
+    }
     if (attacker.fieldworkTarget) return 0;
     if (attacker.ambush && !attacker.revealed) return 0;
     if (attacker.stance === "rest") return 0;
@@ -531,7 +742,12 @@
       if ((battle.fortifications || []).some((item) => item.kind === "camp" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9)) factor /= 1.12;
       if ((battle.fortifications || []).some((item) => item.kind === "palisade" && item.side === target.side && item.hp > 0 && Math.hypot(target.x - item.x, target.z - item.z) <= 9 && segmentHits(item, attacker.x, attacker.z, target.x, target.z))) factor *= ranged ? 0.68 : 0.82;
     }
+    if (battle.controlMode === "turns") {
+      factor *= (TURN_RULES[attacker.type]?.attack || 1) / (TURN_RULES[target.type]?.defense || 1);
+      factor *= TURN_ATTACK_SCALE;
+    }
     const amount = original.damage(battle, attacker, target, structure) * factor;
+    if (battle.controlMode === "turns" && amount > 0) attacker._turnAttackSpent = true;
     if (battle._tacticalStep && amount > 0) {
       attacker.lastAttackTime = battle.time;
       if (!structure && ranged) target._incomingPressure = (target._incomingPressure || 0) + amount / Math.max(1, target.maxTroops) * (attacker.type === "firearm" ? 60 : 35) * (target.formation === "loose" ? .65 : 1);
@@ -595,6 +811,13 @@
     return saved.points.length ? { x: saved.points[0][0], z: saved.points[0][1] } : { x: targetX, z: targetZ };
   }
   function move(battle, unit, x, z) {
+    if (battle.controlMode === "turns" && unit.side === friendly(battle)) {
+      if (!battle._turnExecuting) return;
+      if (unit.order !== "retreat" && (!unit.turnPlan?.move || unit._turnMovement <= 0)) return;
+      // A targeted attack does not grant a free pursuit after the planned move.
+      if (unit.order !== "retreat") { x = unit.turnPlan.move.x; z = unit.turnPlan.move.z; }
+    }
+    if (battle.controlMode === "turns" && unit._turnMovement <= 0) return;
     if (unit.fieldworkTarget) return;
     if (unit.order === "retreat") {
       unit.stance = "balanced";
@@ -640,6 +863,14 @@
       const nextX = oldX + (unit.x - oldX) * factor, nextZ = oldZ + (unit.z - oldZ) * factor;
       if (!blocked(battle, nextX, nextZ, unit.type)) { unit.x = nextX; unit.z = nextZ; }
     }
+    if (battle.controlMode === "turns") {
+      const moved = Math.hypot(unit.x - oldX, unit.z - oldZ), remaining = Math.max(0, unit._turnMovement || 0);
+      if (moved > remaining && moved > 0) {
+        unit.x = oldX + (unit.x - oldX) * remaining / moved;
+        unit.z = oldZ + (unit.z - oldZ) * remaining / moved;
+      }
+      unit._turnMovement = Math.max(0, remaining - Math.min(moved, remaining));
+    }
     if (root.TenkaBattlefield?.blocked(battle.layout, unit.x, unit.z, 0) && unit.type !== "navy") { unit.x = oldX; unit.z = oldZ; }
     for (const gate of gates) gate.passable = false;
     const obstruction = unit.type !== "navy" && (battle.fortifications || []).find((item) => {
@@ -658,7 +889,7 @@
     }
   }
   function tick(battle) {
-    if (battle.phase !== "fighting") return;
+    if (battle.phase !== "fighting" || (battle.controlMode === "turns" && !battle._turnExecuting)) return;
     const before = new Map(battle.units.map((unit) => [unit.id, { x: unit.x, z: unit.z, troops: unit.troops }]));
     battle._tacticalStep = true;
     // The same fatigue rules apply to both armies. Opposing captains preserve
@@ -787,8 +1018,8 @@
     // Allied reserves remain their clan's soldiers. The native settlement uses
     // these fields to debit home armies and seed a captured castle's garrison;
     // feed it only each principal army, while combat still uses both forces.
-    const primary = battle.units.filter((unit) => !unit.foreignSupport);
-    const report = original.result(battle.supportVersion ? { ...battle, units: primary,
+    const primary = battle.units.filter((unit) => !unit.foreignSupport && (battle.controlMode !== "turns" || unit.maxTroops > 0));
+    const report = original.result(battle.supportVersion || battle.controlMode === "turns" ? { ...battle, units: primary,
       initialAttacker: unitCounts(primary, "attacker"), initialDefender: unitCounts(primary, "defender") } : battle);
     if (battle.supportVersion) {
       report.supportReports = (battle.supportCommitments || []).map((support) => {
@@ -813,28 +1044,48 @@
       report.supplyExhausted = !!battle.supply?.[friendly(battle)]?.exhausted;
     }
     report.tacticsVersion = 1;
+    if (battle.controlMode === "turns") {
+      const committed = unitCounts(primary, friendly(battle));
+      report.controlMode = "turns";
+      report.turns = (battle.turnHistory || []).length;
+      report.reserveUnits = Object.fromEntries(TYPES.map(type => [type, Math.max(0, (battle.availableUnits[type] || 0) - committed[type])]));
+      report.reserveTroops = sum(report.reserveUnits);
+      report.reserveDisposition = battle.defending && battle.mode === "siege" && !report.playerWon ? "dispersed" : "garrison";
+    }
     if (battle.defending) {
       const defeat = battle.mode === "field" ? "野戦敗北" : "落城";
       report.message = `${battle.targetCastle.name}の${battle.mode === "field" ? "迎撃野戦" : "籠城戦"}は${report.playerWon ? "防衛成功" : defeat}。守備軍の損失 ${report.enemyCasualties.toLocaleString("ja-JP")}、敵軍の損失 ${report.casualties.toLocaleString("ja-JP")}。兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を消費。`;
       report.phases[0].text = battle.mode === "field" ? "守備軍を野戦に配置し、敵の侵攻を迎え撃ちました。" : "城内の曲輪に守備隊を配置し、籠城を指揮しました。";
       report.phases[2].title = report.playerWon ? "防衛成功" : defeat;
     } else report.message += ` 兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を追加消費。`;
+    if (report.reserveTroops) report.message += report.reserveDisposition === "dispersed"
+      ? ` 未出陣の予備兵 ${report.reserveTroops.toLocaleString("ja-JP")}人は落城により離散しました（討死数には含みません）。`
+      : ` 未出陣の予備兵 ${report.reserveTroops.toLocaleString("ja-JP")}人は出陣元の城に残っています。`;
     if (report.supportReports?.length) report.message += ` 同盟援軍の損失 ${report.supportReports.reduce((total, support) => total + support.casualties, 0).toLocaleString("ja-JP")}人、帰還 ${report.supportReports.reduce((total, support) => total + support.survivors, 0).toLocaleString("ja-JP")}人。`;
     return report;
   }
   function* replayBattle(state, battle) {
     if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
     const battlefieldVersion = battle.battlefieldVersion ?? 0;
+    const controlMode = battle.controlMode === "turns" ? "turns" : undefined;
     if (![0, 1, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
-    let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion, carriedSupply: battle.carriedSupply }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion, carriedSupply: battle.carriedSupply });
+    let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion, carriedSupply: battle.carriedSupply, controlMode }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion, carriedSupply: battle.carriedSupply, controlMode });
     for (let index = 0; index < battle.ledger.length; index++) {
       const record = battle.ledger[index];
       if (["deploy", "order", "formation", "stance", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
         const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "stance" ? stance(replay, record.command.unitId, record.command.stance) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
         if (!answer.ok) return null;
         replay = answer.battle;
-      } else if (record.kind === "start" && replay.phase === "deployment") replay = original.start(replay);
-      else if (record.kind === "tick" && replay.phase === "fighting" && Number.isInteger(record.steps) && record.steps > 0 && record.steps <= 8) {
+      } else if (record.kind === "turn-order" && controlMode === "turns") {
+        const answer = turnOrder(replay, record.command);
+        if (!answer.ok) return null;
+        replay = answer.battle;
+      } else if (record.kind === "turn-end" && controlMode === "turns") {
+        const answer = endTurn(replay);
+        if (!answer.ok) return null;
+        replay = answer.battle;
+      } else if (record.kind === "start" && replay.phase === "deployment") replay = start(replay);
+      else if (record.kind === "tick" && controlMode !== "turns" && replay.phase === "fighting" && Number.isInteger(record.steps) && record.steps > 0 && record.steps <= 8) {
         for (let step = 0; step < record.steps && replay.phase === "fighting"; step++) {
           tick(replay);
           yield { completed: index, total: battle.ledger.length, percent: Math.floor((index + (step + 1) / record.steps) / battle.ledger.length * 100) };
@@ -980,8 +1231,8 @@
     if (installed) return installed;
     for (const name of ["create", "deploy", "order", "start", "damage", "move", "tick", "result", "verify"]) if (typeof core[name] !== "function") throw Error(`合戦機関の ${name} がありません。`);
     original = { ...core };
-    installed = { ...core, create, deploy, order, damage, move, tick, result, verify };
+    installed = { ...core, create, deploy, order, start, damage, move, tick, result, verify };
     return installed;
   }
-  root.TenkaTactics = Object.freeze({ version: 2, formations: FORMATIONS, stances: STANCES, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, stance, tacticalView, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, verifyAsync, result, stamp });
+  root.TenkaTactics = Object.freeze({ version: 2, formations: FORMATIONS, stances: STANCES, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, start, deploymentStatus, assignCommander, confirmDeployment, turnRules: TURN_RULES, turnView, endTurn, withdrawBattle, settleDefense, deploy, order, formation, stance, tacticalView, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, verifyAsync, result, stamp });
 })(typeof window !== "undefined" ? window : globalThis);

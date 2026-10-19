@@ -4,6 +4,10 @@
 Serve the repository, then run python tests/deployment-browser.py --url http://127.0.0.1:8027
 Python Playwright and Chromium are required. Fixtures prepare valid campaign saves;
 all battle operations then use the shipped user interface and production engine.
+
+This compatibility harness checks legacy real-time deployment records and 3D
+pointer controls. monthly-turns-browser.py separately checks the current live
+turn-based field, siege and defensive battle flows.
 """
 import argparse
 import json
@@ -33,6 +37,22 @@ SPOT = """({kind,id,rotation})=>{
 }"""
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def instrumented_html():
+    html = (ROOT / 'index.html').read_text()
+    marker = '(0,zv.createRoot)(document.getElementById(`root`))'
+    assert html.count(marker) == 1
+    legacy = """
+// Test-only legacy record compatibility; current live turns are checked by monthly-turns-browser.py.
+const legacyBattleCreate=Xn,legacyBattleDefense=window.TenkaTactics.createDefense;
+Xn=options=>legacyBattleCreate({...options,controlMode:undefined});
+window.TenkaTactics.createDefense=(state,threat,options={})=>legacyBattleDefense(state,threat,{...options,controlMode:undefined});
+"""
+    return html.replace(marker, legacy + marker, 1)
+
+
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('--url',default='http://127.0.0.1:8027')
@@ -42,20 +62,25 @@ def main():
  parser.add_argument('--modes',default='field,siege,defense')
  args=parser.parse_args();shots=Path(args.screenshots);shots.mkdir(parents=True,exist_ok=True)
  checks=[];errors=[]
+ html=instrumented_html();url=args.url.rstrip('/')+'/'
  def checked(text):checks.append(text);print('PASS: '+text,flush=True)
  with sync_playwright() as p:
   browser=p.chromium.launch(executable_path=args.chromium,headless=True,args=['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
   for width in map(int,args.widths.split(',')):
    for mode in args.modes.split(','):
     context=browser.new_context(viewport={'width':width,'height':1100 if width>600 else 844},device_scale_factor=1)
+    context.add_init_script("localStorage.setItem('tenka-battle-renderer','3d')")
     page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
+    page.route(url,lambda route:route.fulfill(status=200,content_type='text/html',body=html))
     page.on('console',lambda message: errors.append(message.text) if message.type=='error' else None)
-    page.goto(args.url,wait_until='domcontentloaded')
+    page.goto(url,wait_until='domcontentloaded')
     expect(page.get_by_role('combobox',name='開始する大名',exact=True)).to_be_visible()
     page.evaluate(FIXTURE,mode);page.reload(wait_until='domcontentloaded')
     page.get_by_role('button',name='織田家の続きから遊ぶ',exact=True).click()
     page.evaluate(REFERENCE,mode)
-    if mode=='defense':page.get_by_role('button',name='籠城を指揮する',exact=True).click()
+    if mode=='defense':
+     page.get_by_role('button',name='籠城を指揮する',exact=True).click()
+     page.get_by_role('button',name='この兵糧で籠城を指揮する',exact=True).click()
     else:
      page.get_by_role('button',name='稲葉山城へ出陣',exact=True).click()
      page.get_by_role('button',name=re.compile('^野戦' if mode=='field' else '^攻城戦')).click()
@@ -64,7 +89,7 @@ def main():
     toolbar=page.locator('.tenka-deployment');expect(toolbar).to_be_visible()
     canvas=page.locator('.tactical-canvas canvas');expect(canvas).to_be_visible()
     expect(page.locator('.tactical-graphics-error')).to_have_count(0)
-    banner=page.locator('.tenka-castle-visual')
+    banner=page.locator('.tenka-castle-visual:not(.tenka-field-visual)')
     if mode=='field':expect(banner).to_have_count(0)
     else:
      expect(banner).to_be_visible()

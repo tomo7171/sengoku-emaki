@@ -11,8 +11,13 @@
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const sum = (v) => UNITS.reduce((n, k) => n + (v?.[k] || 0), 0);
   const hash = (v) => { let h = 2166136261; for (const c of String(v)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; };
-  const date = (s) => `${s.year}年 ${SEASONS[s.season]}`;
-  const point = (s) => s.year * 4 + s.season;
+  const monthly = (s) => Number.isInteger(s.month) && s.month >= 1 && s.month <= 12;
+  const periodMonths = (s) => monthly(s) ? 1 : 3;
+  const date = (s) => `${s.year}年 ${monthly(s) ? `${s.month}月` : SEASONS[s.season]}`;
+  const point = (s) => s.year * 12 + (monthly(s)?s.month:[3,6,9,12][s.season]);
+  const eventPoint = (e) => e.year * 12 + [3,6,9,12][e.season];
+  const harvestTime = (s) => monthly(s) ? s.month === 9 : s.season === 2;
+  const periodLabel = (s) => monthly(s) ? '月' : '季';
   const owned = (s, clan = s.playerClan) => s.castles.filter(c => c.clan === clan);
   const getOfficer = (s, id) => s.officers.find(o => o.id === id);
   const getCastle = (s, id) => s.castles.find(c => c.id === id);
@@ -48,8 +53,8 @@
     { id: '1590-odawara', year: 1590, season: 1, title: '小田原合戦', text: '史実では秀吉の大軍が小田原を包囲し、北条氏が降伏した。本作では城の所有・籠城の結果を変えず、実際の戦況に従う。', source: 'odawara', effect: 'chronicle' }
   ];
   const ACTIONS = {
-    reclaim: { label: '開墾・治水', gold: 300, food: 0, stat: 'politics', description: '労働力と工事維持費を確保し、三季で新田を整備。適地が減るほど費用が増し、成果は小さくなる。' },
-    commercial: { label: '商業・港整備', gold: 350, food: 0, stat: 'politics', description: '市・港の整備は二季。着工直後は仮設市の収入だけで、完成後も設備維持費がかかる。' },
+    reclaim: { label: '開墾・治水', gold: 300, food: 0, stat: 'politics', description: '労働力と継続する工事維持費を確保して新田を整備。適地が減るほど費用が増し、成果は小さくなる。' },
+    commercial: { label: '商業・港整備', gold: 350, food: 0, stat: 'politics', description: '市・港を段階的に整備。着工直後は仮設市の収入だけで、完成後も設備維持費がかかる。' },
     levy: { label: '石高に応じた徴兵', gold: 250, food: 350, stat: 'leadership', description: '石高・人口・地形が定める上限内で足軽を募る。' },
     reward: { label: '家臣への恩賞', gold: 200, food: 0, stat: 'politics', description: '対象の自家武将の忠誠を高め、敵の調略を防ぐ。' },
     negotiation: { label: '外交使節', gold: 300, food: 0, stat: 'politics', description: '政治・知略で友好を上げ、75以上で四季の同盟を結ぶ。' },
@@ -57,19 +62,21 @@
     enlist: { label: '捕虜を召し抱える', gold: 220, food: 0, stat: 'politics', description: '自家の捕虜を説得し、新たな家臣にする。成功率は忠誠と使者の能力次第。' },
     release: { label: '捕虜を解放', gold: 0, food: 0, stat: 'politics', description: '捕虜を旧主へ返す。旧主が滅亡していれば浪人となる。' },
     execute: { label: '捕虜を処断', gold: 0, food: 0, stat: 'leadership', description: '捕虜を処断する。友好・威信・家臣の忠誠が低下する。' },
-    tax: { label: '年貢方針の変更', gold: 0, food: 0, stat: 'politics', description: '軽税・標準・重税を城別に指定。重税は収入を増すが不満が蓄積し、軽税は秩序回復を助ける。同じ城で一季一回。' },
+    tax: { label: '年貢方針の変更', gold: 0, food: 0, stat: 'politics', description: '軽税・標準・重税を城別に指定。重税は収入を増すが不満が蓄積し、軽税は秩序回復を助ける。同じ城で一期間に一回。' },
     relief: { label: '領民の救済', gold: 80, food: 600, stat: 'politics', description: '蔵の兵糧を領民へ分配。不満・荒廃を減らし、収穫と取引の回復を助ける。' },
     buyGrain: { label: '兵糧の買い入れ', gold: 400, food: 0, stat: 'politics', description: '金400貫で兵糧1,200石を買い入れる。戦費と収穫前の備蓄を両立させる。' },
     sellGrain: { label: '余剰兵糧の売却', gold: 0, food: 1200, stat: 'politics', description: '兵糧1,200石を金300貫に換える。売却後も全領の二季分の維持兵糧を残す必要がある。' },
     demobilize: { label: '兵を農村へ戻す', gold: 0, food: 0, stat: 'leadership', description: '守備兵150人以上を残して解兵。軍維持費と農作業への負担を減らす。兵科別に均等比率で解兵する。' }
   };
+  ACTIONS.waterworks = {label:'堤防・用水の整備',gold:260,food:0,stat:'politics',description:'堤防と用水路を整え治水を改善。洪水と日照りの危険を減らし、荒れた田畑を復旧する。'};
+  ACTIONS.sanitation = {label:'衛生・救護の手配',gold:180,food:120,stat:'politics',description:'水場の清掃と病人の救護に資金・兵糧を充て、疫病を抑え領民の不満を和らげる。'};
   const ADMINISTRATION_ID = 'local-administration';
-  const ADMINISTRATION_ACTIONS = ['reclaim', 'commercial', 'levy', 'reward', 'release', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize'];
-  const DOMESTIC_ACTIONS = ['reclaim', 'commercial', 'levy', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize'];
+  const ADMINISTRATION_ACTIONS = ['reclaim', 'commercial', 'levy', 'reward', 'release', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize','waterworks','sanitation'];
+  const DOMESTIC_ACTIONS = ['reclaim', 'commercial', 'levy', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize','waterworks','sanitation'];
   const TAX_POLICIES = [
-    { id: 'low', label: '軽税', cash: 0.78, grain: 0.82, unrest: -7, description: '年貢収入は減るが領民の不満を毎季7軽減。立て直しと長期安定を優先。' },
-    { id: 'standard', label: '標準', cash: 1, grain: 1, unrest: -2, description: '収入と負担の均衡を取る。不満を毎季2軽減。' },
-    { id: 'high', label: '重税', cash: 1.24, grain: 1.2, unrest: 9, description: '当面の年貢収入が増すが、毎季9の不満が蓄積。高い不満は収入・収穫を損ない一揆を招く。' }
+    { id: 'low', label: '軽税', cash: 0.78, grain: 0.82, unrest: -7, description: '年貢収入は減るが領民の負担を軽くし、不満の回復を助ける。立て直しと長期安定を優先。' },
+    { id: 'standard', label: '標準', cash: 1, grain: 1, unrest: -2, description: '収入と領民の負担の均衡を取り、不満を少しずつ和らげる。' },
+    { id: 'high', label: '重税', cash: 1.24, grain: 1.2, unrest: 9, description: '当面の年貢収入が増すが、不満が蓄積。高い不満は収入・収穫を損ない一揆を招く。' }
   ];
 
   function mobilizationLimit(c) {
@@ -85,7 +92,8 @@
     };
     const t = s.tenka;
     for (const key of ['loyalty', 'assignments', 'estates']) if (!t[key] || typeof t[key] !== 'object' || Array.isArray(t[key])) t[key] = {};
-    for (const key of ['chronicle', 'events', 'processedBattles', 'casualties', 'turnReports', 'pendingCaptures']) if (!Array.isArray(t[key])) t[key] = [];
+    for (const key of ['chronicle', 'events', 'processedBattles', 'casualties', 'turnReports', 'pendingCaptures','disasters']) if (!Array.isArray(t[key])) t[key] = [];
+    t.disasters=t.disasters.filter(e=>e&&e.kind==='simulation'&&typeof e.id==='string').slice(0,240);
     // A seasonal task expires with its turn. Invalid/future save entries must
     // never lock an officer later or create a task that cannot be completed.
     for (const [id, task] of Object.entries(t.assignments)) {
@@ -96,14 +104,18 @@
       const estate = t.estates[c.id] || {};
       const reclaimed = Math.max(0, number(estate.reclaimed, 0));
       const projects = Array.isArray(estate.projects) ? estate.projects.filter(p => p && ['reclaim', 'commercial'].includes(p.type)
-        && Number.isInteger(p.remaining) && p.remaining > 0 && p.remaining <= 12
+        && Number.isInteger(p.remaining) && p.remaining > 0 && p.remaining <= 36
         && Number.isInteger(p.startedTurn) && p.startedTurn <= s.turn && p.startedTurn >= 1
-        && [p.gain,p.workforce,p.upkeep].every(n => Number.isFinite(n) && n >= 0 && n <= 1000000)).slice(0,2) : [];
+        && [p.gain,p.workforce,p.upkeep].every(n => Number.isFinite(n) && n >= 0 && n <= 1000000)).slice(0,2).map(p=>monthly(s)&&p.periodUnit!=='month'?{...p,remaining:p.remaining*3,total:(p.total||p.remaining)*3,upkeep:Math.max(1,Math.round(p.upkeep/3)),periodUnit:'month'}:p) : [];
       t.estates[c.id] = { ...estate, commerce: clamp(Math.floor(number(estate.commerce, 0)), 0, 10), reclaimed,
         baseKokudaka: Math.max(1000, number(estate.baseKokudaka, c.kokudaka - reclaimed)),
         devastation: clamp(number(estate.devastation, 0), 0, 100),
         unrest: clamp(number(estate.unrest, 0), 0, 100),
         laborDisruption: clamp(number(estate.laborDisruption, 0), 0, 100),
+        waterControl:clamp(number(estate.waterControl,({plain:43,coast:38,hill:53,mountain:62}[c.terrain]||45)+(hash(c.id)%15)-7),0,100),
+        cropDamage:clamp(number(estate.cropDamage,0),0,80),
+        famine:clamp(number(estate.famine,0),0,100),epidemic:clamp(number(estate.epidemic,0),0,100),
+        uprising:estate.uprising&&['peasant','ikko'].includes(estate.uprising.kind)?{...estate.uprising,strength:clamp(number(estate.uprising.strength,25),0,100)}:null,
         taxPolicy: TAX_POLICIES.some(p => p.id === estate.taxPolicy) ? estate.taxPolicy : 'standard', projects };
     }
     const economy = t.economy && typeof t.economy === 'object' && !Array.isArray(t.economy) ? t.economy : {};
@@ -122,7 +134,7 @@
     const military = Math.round(c.troops * 1.45);
     const construction = estate.projects.reduce((n,p) => n+p.workforce,0);
     const available = Math.max(0, workforce - military - construction);
-    const efficiency = clamp(1 - (military+construction)/Math.max(1,workforce)*0.58 - estate.laborDisruption/200, 0.32, 1);
+    const efficiency = clamp(1 - (military+construction)/Math.max(1,workforce)*0.58 - estate.laborDisruption/200-estate.epidemic*.002-estate.famine*.001, 0.25, 1);
     return { workforce, military, construction, available, efficiency };
   }
   function developmentCost(s, c, type, power=60) {
@@ -131,41 +143,126 @@
     const workforce = type==='reclaim' ? Math.round(Math.min(2200, Math.max(350,c.population*0.035))) : 400+estate.commerce*90;
     const gold=type==='reclaim' ? 300+Math.floor(estate.reclaimed/2500)*100 : 350+estate.commerce*140;
     const gain=type==='reclaim' ? Math.max(0,Math.min(capacity-estate.reclaimed,Math.round((1000+power*25)*(1-completion*.75)))) : 1;
-    const duration=type==='reclaim'?3:2, upkeep=type==='reclaim'?45+Math.floor(estate.reclaimed/4000)*10:40+estate.commerce*8;
+    const duration=(type==='reclaim'?3:2)*(monthly(s)?3:1), upkeep=Math.round((type==='reclaim'?45+Math.floor(estate.reclaimed/4000)*10:40+estate.commerce*8)*(monthly(s)?1/3:1));
     const reason=estate.projects.some(p=>p.type===type)?'同じ種類の工事が進行中です。完成を待つか、別の城へ投資してください。'
       :type==='reclaim'&&gain<100?'この領地の開墾適地はほぼ整備済みです。'
         :type==='commercial'&&estate.commerce>=10?'この城の商業は最大の十段階です。'
           :labor.available<workforce?'農作業と守備に必要な人手が不足しています。解兵か既存工事の完成で労働力を確保してください。':'';
     return {gold,food:0,workforce,duration,upkeep,gain,available:!reason,reason};
   }
+  const WAGES={ashigaru:.015,archer:.018,cavalry:.035,firearm:.025,navy:.028};
+  const RATIONS={ashigaru:.06,archer:.06,cavalry:.085,firearm:.06,navy:.07};
+  const UNIT_NAMES={ashigaru:'足軽',archer:'弓',cavalry:'騎馬',firearm:'鉄砲',navy:'水軍'};
+  function militaryBudget(s,c) {
+    const composition=s.armies?.[c.id]?.units,listed=sum(composition),troops=Math.max(0,c.troops||0);
+    const breakdown=UNITS.map(type=>({type,label:UNIT_NAMES[type],troops:listed?troops*(composition?.[type]||0)/listed:type==='ashigaru'?troops:0}));
+    for(const line of breakdown) {
+      line.monthlyWages=Math.round(line.troops*WAGES[line.type]);line.monthlyFood=Math.round(line.troops*RATIONS[line.type]);line.troops=Math.round(line.troops);
+    }
+    return {monthlyWages:breakdown.reduce((n,u)=>n+u.monthlyWages,0),monthlyFood:breakdown.reduce((n,u)=>n+u.monthlyFood,0),militaryBreakdown:breakdown};
+  }
   function estateBudget(s,c) {
     const estate=s.tenka.estates[c.id],policy=TAX_POLICIES.find(p=>p.id===estate.taxPolicy),labor=estateWorkforce(c,estate);
     const commander=getOfficer(s,s.armies?.[c.id]?.commanderId);
-    const order=clamp(1-estate.devastation*.005-estate.unrest*.004,0.24,1);
-    const taxIncome=Math.round((c.kokudaka*.012+c.population*.003)*(.88+(commander?.politics||45)/500)*policy.cash*order);
-    const commerce=commerceIncome(c,estate,s.tenka);
-    const militaryUpkeep=Math.round(c.troops*.055);
-    const maintenance=Math.round(estate.commerce*18+estate.reclaimed*.002);
+    const order=clamp(1-estate.devastation*.005-estate.unrest*.004-(estate.uprising?.strength||0)*.0015,0.2,1);
+    const fraction=periodMonths(s)/3,military=militaryBudget(s,c);
+    const taxIncome=Math.round((c.kokudaka*.012+c.population*.003)*(.88+(commander?.politics||45)/500)*policy.cash*order*fraction);
+    const commerce=Math.round(commerceIncome(c,estate,s.tenka)*fraction);
+    const militaryUpkeep=monthly(s)?military.monthlyWages:Math.round(c.troops*.055);
+    const maintenance=Math.round((estate.commerce*18+estate.reclaimed*.002)*fraction);
     const projectUpkeep=estate.projects.reduce((n,p)=>n+p.upkeep,0);
-    const foodUpkeep=Math.round(c.troops*.18);
-    const harvest=Math.round(c.kokudaka*.28*policy.grain*labor.efficiency*order);
+    const foodUpkeep=monthly(s)?military.monthlyFood:Math.round(c.troops*.18);
+    const baselineHarvest=Math.round(c.kokudaka*.28*policy.grain*labor.efficiency);
+    const harvestFactor=order*(1-estate.cropDamage/100);
+    const harvest=Math.round(baselineHarvest*harvestFactor);
     return {castleId:c.id,clan:c.clan,taxIncome,commerceIncome:commerce,income:taxIncome+commerce,
       militaryUpkeep,maintenance,projectUpkeep,upkeep:militaryUpkeep+maintenance+projectUpkeep,
       netIncome:taxIncome+commerce-militaryUpkeep-maintenance-projectUpkeep,foodUpkeep,harvest,
+      ...military,periodMonths:periodMonths(s),baselineHarvest,harvestFactor,harvestLoss:baselineHarvest-harvest,
       laborAvailable:labor.available,workforce:labor.workforce,laborEfficiency:Math.round(labor.efficiency*100),
-      foodReserveSeasons:foodUpkeep?Math.floor((c.clan===s.playerClan?s.food:c.food)/foodUpkeep*10)/10:null};
+      foodReserveMonths:military.monthlyFood?Math.floor((c.clan===s.playerClan?s.food:c.food)/military.monthlyFood*10)/10:null,
+      foodReserveSeasons:foodUpkeep?Math.floor((c.clan===s.playerClan?s.food:c.food)/foodUpkeep*(monthly(s)?1/3:1)*10)/10:null};
   }
   function economyForecast(input) {
     const s=initialize(input),castles=s.castles.map(c=>estateBudget(s,c)),mine=castles.filter(c=>c.clan===s.playerClan);
     const totals={};
-    for(const key of ['income','taxIncome','commerceIncome','upkeep','militaryUpkeep','maintenance','projectUpkeep','netIncome','foodUpkeep','harvest'])totals[key]=mine.reduce((n,c)=>n+c[key],0);
-    totals.foodReserveSeasons=totals.foodUpkeep?Math.floor(s.food/totals.foodUpkeep*10)/10:null;
-    const nextSeason=(s.season+1)%4;
-    totals.nextHarvest=nextSeason===2?totals.harvest:0;
+    for(const key of ['income','taxIncome','commerceIncome','upkeep','militaryUpkeep','maintenance','projectUpkeep','netIncome','foodUpkeep','harvest','baselineHarvest','harvestLoss','monthlyWages','monthlyFood'])totals[key]=mine.reduce((n,c)=>n+c[key],0);
+    totals.periodMonths=periodMonths(s);
+    totals.foodReserveSeasons=totals.foodUpkeep?Math.floor(s.food/totals.foodUpkeep*(monthly(s)?1/3:1)*10)/10:null;
+    totals.foodReserveMonths=totals.monthlyFood?Math.floor(s.food/totals.monthlyFood*10)/10:null;
+    const nextMonth=monthly(s)?s.month%12+1:null;
+    const nextSeason=monthly(s)?nextMonth>=3&&nextMonth<=5?0:nextMonth>=6&&nextMonth<=8?1:nextMonth>=9&&nextMonth<=11?2:3:(s.season+1)%4;
+    totals.nextHarvest=(monthly(s)?nextMonth===9:nextSeason===2)?totals.harvest:0;
     totals.projectedGold=Math.max(0,s.gold+totals.netIncome);
     totals.projectedFood=Math.max(0,s.food+totals.nextHarvest-totals.foodUpkeep);
-    return {totals,castles,nextSeason,policies:clone(TAX_POLICIES),ledger:s.tenka.economy.ledger,
+    return {totals,castles,nextSeason,nextMonth,policies:clone(TAX_POLICIES),ledger:s.tenka.economy.ledger,events:clone(s.tenka.disasters),monthly:monthly(s),
       reserveSeasons:totals.foodReserveSeasons};
+  }
+  const IKKO_PROVINCES=new Set(['加賀','越前','越中','能登','三河','近江','摂津','河内','紀伊']);
+  function climateRisks(s,c,estate=s.tenka.estates[c.id]) {
+    const month=monthly(s)?s.month:[4,7,10,1][s.season],water=estate.waterControl/100;
+    const south=['薩摩','大隅','日向','肥後','肥前','筑後','豊後','豊前','筑前','土佐','阿波','伊予','讃岐','紀伊'].includes(c.province);
+    const terrainRisk=c.terrain==='plain'?1.2:c.terrain==='mountain'?.55:1;
+    const factor=periodMonths(s);
+    return {drought:[6,7,8].includes(month)?(.018+(1-water)*.045)*factor:0,
+      pests:[5,6,7,8,9].includes(month)?.024*factor:0,
+      typhoon:[8,9,10].includes(month)?(c.coastal||c.terrain==='coast'?.037:.015)*(south?1.3:1)*factor:0,
+      flood:[6,7,9,10].includes(month)?(.007+(1-water)*.065)*terrainRisk*factor:0};
+  }
+  function estateEvent(s,c,type,title,text,extra={}) {
+    const event={id:`estate-${c.id}-${s.turn}-${type}${extra.battleId?`-${extra.battleId}`:''}`,kind:'simulation',type,title,text,castleId:c.id,castleName:c.name,
+      turn:s.turn,year:s.year,season:s.season,...(monthly(s)?{month:s.month}:{}),date:date(s),...extra};
+    if(s.tenka.disasters.some(e=>e.id===event.id))return;
+    s.tenka.disasters.unshift(event);s.tenka.disasters=s.tenka.disasters.slice(0,240);
+    if(c.clan===s.playerClan){s.tenka.turnReports.push(`${c.name}：${title}。${text}`);append(s,'domestic',`${c.name}・${title}`,`${text}（ゲーム内の地域・気候シミュレーション）`);}
+  }
+  function climateProgress(s,c) {
+    const e=s.tenka.estates[c.id];if(e.lastClimateTurn===s.turn)return;e.lastClimateTurn=s.turn;
+    if(!monthly(s))return;
+    const months=periodMonths(s),month=monthly(s)?s.month:[4,7,10,1][s.season];
+    // Weather damages remain in the coming harvest; winter/spring recovery
+    // restores fields, rather than permanently reducing their assessed kokudaka.
+    e.cropDamage=Math.max(0,e.cropDamage-([11,12,1,2,3].includes(month)?4:1)*months);
+    e.waterControl=Math.max(0,e.waterControl-.35*months);
+    const risks=climateRisks(s,c,e),seed=`${s.year}:${month}:${s.turn}:${c.id}:${e.baseKokudaka}`;
+    if(s.turn-number(e.lastWeatherTurn,-100)>=(monthly(s)?2:1)) {
+      const candidates=Object.entries(risks).filter(([kind,chance])=>hash(`weather:${seed}:${kind}`)/4294967296<chance);
+      // A single local weather event is enough for one period: do not stack
+      // four independent disasters into an unmanageable opening month.
+      candidates.sort((a,b)=>hash(`pick:${seed}:${a[0]}`)-hash(`pick:${seed}:${b[0]}`));
+      if(candidates.length) {
+        const type=candidates[0][0],damage=type==='pests'?12+hash(seed)%7:type==='typhoon'?18+hash(seed)%9:type==='flood'?14+hash(seed)%9:15+hash(seed)%8;
+        e.lastWeatherTurn=s.turn;e.cropDamage=clamp(e.cropDamage+damage,0,80);e.unrest=clamp(e.unrest+(type==='typhoon'||type==='flood'?7:4),0,100);
+        if(type==='flood'||type==='typhoon'){e.laborDisruption=clamp(e.laborDisruption+8,0,100);e.waterControl=Math.max(0,e.waterControl-3);}
+        if(type==='flood')e.lastFloodTurn=s.turn;
+        const title={drought:'日照りによる水不足',pests:'害虫の発生',typhoon:'台風による農作物被害',flood:'河川の氾濫'}[type];
+        estateEvent(s,c,type,title,`田畑の被害 +${damage}。秋の収穫見込が減少し、領民の不満が高まります。${type==='flood'?'堤防・用水整備で再発の危険を下げられます。':''}`,{cropDamage:damage});
+      }
+    }
+    const diseaseRisk=(.006+e.famine*.0009+(s.turn-number(e.lastFloodTurn,-100)<=2?.025:0))*months;
+    if(e.epidemic<=5&&hash(`disease:${seed}`)/4294967296<diseaseRisk) {
+      e.epidemic=28+hash(`severity:${seed}`)%18;
+      estateEvent(s,c,'epidemic','疫病の流行','病により人口と農作業の人手が減少。衛生・救護、領民救済で被害を抑えられます。');
+    } else e.epidemic=Math.max(0,e.epidemic-3*months);
+  }
+  function unrestProgress(s,c) {
+    const e=s.tenka.estates[c.id],months=periodMonths(s),policy=TAX_POLICIES.find(p=>p.id===e.taxPolicy);
+    e.unrest=clamp(e.unrest+policy.unrest*months/3+(e.devastation>=40?months:0)+e.famine*.025*months+e.epidemic*.018*months,0,100);
+    e.laborDisruption=Math.max(0,e.laborDisruption-5*months/3);
+    if(e.uprising) {
+      e.uprising.strength=clamp(e.uprising.strength+(e.unrest>=75?2:-8)*months+(policy.id==='low'?-3*months:0),0,100);
+      c.morale=clamp(c.morale-2*months,10,100);e.laborDisruption=clamp(e.laborDisruption+2*months,0,100);
+      if(e.uprising.strength===0||e.unrest<42){estateEvent(s,c,'uprising-resolved','一揆の鎮静','救済と負担の軽減により領内が落ち着きました。');e.uprising=null;}
+    } else if(e.unrest>=80&&s.turn-number(e.lastUprisingTurn,-100)>=(monthly(s)?8:3)) {
+      const chance=e.unrest>=90?1:monthly(s)?.18:.55;
+      if(hash(`uprising:${s.turn}:${c.id}:${s.year}`)/4294967296<chance) {
+        const kind=IKKO_PROVINCES.has(c.province)&&s.year>=1488&&s.year<=1605&&hash(`faith:${c.id}:${s.turn}`)%100<48?'ikko':'peasant';
+        const label=kind==='ikko'?'一向一揆':'農民一揆';
+        e.uprising={kind,label,startedTurn:s.turn,strength:30+Math.round((e.unrest-80)*1.5)};e.lastUprisingTurn=s.turn;
+        c.morale=clamp(c.morale-8,10,100);e.devastation=clamp(e.devastation+5,0,100);
+        estateEvent(s,c,'uprising',label,`${kind==='ikko'?'寺内・門徒の結びつきも加わり':'年貢と飢えへの不満が募り'}民衆が蜂起。徴税・農作業・工事に支障が出ます。軽税と領民救済で不満を下げてください。`,{uprisingKind:kind});
+      }
+    }
   }
   function progressEstates(s) {
     if(s.tenka.economy.lastProgressTurn===s.turn)return {};
@@ -173,15 +270,7 @@
     const workCosts={};
     for(const c of s.castles) {
       const estate=s.tenka.estates[c.id];
-      const policy=TAX_POLICIES.find(p=>p.id===estate.taxPolicy);
-      estate.unrest=clamp(estate.unrest+policy.unrest+(estate.devastation>=40?3:0),0,100);
-      estate.laborDisruption=Math.max(0,estate.laborDisruption-5);
-      // Assess unrest before allocating work: an uprising lowers the tax base
-      // and must not let construction spend income that will never arrive.
-      if(estate.unrest>=80) {
-        c.morale=clamp(c.morale-8,10,100);estate.devastation=clamp(estate.devastation+5,0,100);
-        if(c.clan===s.playerClan)s.tenka.turnReports.push(`${c.name}で年貢への不満が一揆に発展。士気 -8、荒廃 +5。軽税や領民救済で鎮静できます。`);
-      }
+      climateProgress(s,c);unrestProgress(s,c);
     }
     const budgets=new Map(s.castles.map(c=>[c.id,estateBudget(s,c)]));
     // Player castles share one treasury. Set aside all mandatory army and
@@ -196,15 +285,15 @@
       workCosts[c.id]=0;
       for(const p of estate.projects) {
         if(p.startedTurn>=s.turn)continue;
-        if(constructionFunds<p.upkeep||estate.unrest>=85) {
-          p.status=constructionFunds<p.upkeep?'資金不足で中断':'一揆のため中断';
-          if(c.clan===s.playerClan)s.tenka.turnReports.push(`${c.name}の${p.label}は${p.status}。工事の残り${p.remaining}季。`);
+        if(constructionFunds<p.upkeep||estate.uprising||estate.unrest>=85) {
+          p.status=constructionFunds<p.upkeep?'資金不足で中断':'一揆・不満のため中断';
+          if(c.clan===s.playerClan)s.tenka.turnReports.push(`${c.name}の${p.label}は${p.status}。工事の残り${p.remaining}${periodLabel(s)}。`);
           continue;
         }
         constructionFunds-=p.upkeep;workCosts[c.id]+=p.upkeep;
         p.status='工事中';p.remaining--;
         if(p.remaining===0) {
-          if(p.type==='reclaim') {c.kokudaka+=p.gain;c.population+=Math.round(p.gain*.3);estate.reclaimed+=p.gain;}
+          if(p.type==='reclaim') {c.kokudaka+=p.gain;c.population+=Math.round(p.gain*.3);estate.reclaimed+=p.gain;estate.waterControl=clamp(estate.waterControl+8,0,100);}
           if(c.clan===s.playerClan)s.tenka.turnReports.push(`${c.name}の${p.label}が完成。${p.type==='reclaim'?`石高 +${p.gain.toLocaleString('ja-JP')}石。`:'仮設市から本格操業へ移り、商業収入が増えました。'}`);
         }
       }
@@ -233,32 +322,50 @@
       if(budget.clan===state.playerClan) {n.projectUpkeep+=difference;n.upkeep+=difference;n.netIncome-=difference;}
     }
     const goldBefore=state.gold,foodBefore=state.food;
-    const harvest=state.season===2?n.harvest:0;
+    const harvest=harvestTime(state)?n.harvest:0;
     const goldDeficit=Math.max(0,n.upkeep-goldBefore-n.income);
     const foodDeficit=Math.max(0,n.foodUpkeep-foodBefore-harvest);
     state.gold=Math.max(0,goldBefore+n.netIncome);state.food=Math.max(0,foodBefore+harvest-n.foodUpkeep);
+    // Player estates draw from one national granary. Compare that shared
+    // reserve with the whole country's needs, not each castle's small share.
+    const nationalReliefReserve=n.monthlyFood*6+owned(state).reduce((total,c)=>total+c.population,0)*.02;
     for(const c of state.castles) {
       const estate=state.tenka.estates[c.id],budget=forecast.castles.find(b=>b.castleId===c.id);
       const player=c.clan===state.playerClan;
-      const shortage=player?foodDeficit>0:c.food+(state.season===2?budget.harvest:0)<budget.foodUpkeep;
+      const shortage=player?foodDeficit>0:c.food+(harvestTime(state)?budget.harvest:0)<budget.foodUpkeep;
       const arrears=player?goldDeficit>0:c.gold+budget.income<budget.upkeep;
-      if(!player) {c.gold=Math.max(0,c.gold+budget.netIncome);c.food=Math.max(0,c.food+(state.season===2?budget.harvest:0)-budget.foodUpkeep);}
+      if(!player) {c.gold=Math.max(0,c.gold+budget.netIncome);c.food=Math.max(0,c.food+(harvestTime(state)?budget.harvest:0)-budget.foodUpkeep);}
       c.morale=clamp(c.morale+(shortage?-15:arrears?-5:estate.unrest>=60?-3:2),10,100);
       if(shortage) {loseTroops(state,c,Math.floor(c.troops*.08));estate.unrest=clamp(estate.unrest+8,0,100);}
       if(arrears)estate.unrest=clamp(estate.unrest+4,0,100);
-      estate.lastLedger={...budget,turn:state.turn,year:state.year,season:state.season,harvest:state.season===2?budget.harvest:0,shortage,arrears};
+      let populationLoss=0;
+      if(monthly(state)) {
+        const reserve=player?state.food:c.food;
+        const requiredReserve=player?nationalReliefReserve:budget.monthlyFood*6+c.population*.02;
+        const poorHarvest=harvestTime(state)&&budget.harvestFactor<.7&&reserve<requiredReserve;
+        if(shortage||poorHarvest) {
+          const before=estate.famine;estate.famine=clamp(estate.famine+(shortage?24:18),0,100);estate.unrest=clamp(estate.unrest+5,0,100);
+          if(before<15||poorHarvest)estateEvent(state,c,'famine','凶作と飢饉',`${poorHarvest?'戦禍や天候による減収で':'備蓄の不足により'}領民への食糧が行き渡りません。救済・兵糧購入・解兵で備蓄と働き手を確保してください。`);
+        } else estate.famine=Math.max(0,estate.famine-7);
+        populationLoss=Math.min(Math.max(0,c.population-300),Math.round(c.population*(estate.famine*.000025+estate.epidemic*.000035)));
+        c.population-=populationLoss;
+      }
+      estate.lastLedger={...budget,turn:state.turn,year:state.year,season:state.season,...(monthly(state)?{month:state.month}:{}),harvest:harvestTime(state)?budget.harvest:0,shortage,arrears,populationLoss,
+        events:clone(state.tenka.disasters.filter(e=>e.castleId===c.id&&e.turn===state.turn))};
       // Regional NPC armies obey the same harvest and upkeep rules, then use
       // their own treasury for a small replacement draft, as in the base game.
-      if(!player&&c.gold>=100&&c.food>=250&&c.troops<mobilizationLimit(c)&&estate.unrest<65) {
-        const count=Math.min(160,mobilizationLimit(c)-c.troops);c.gold-=100;c.food-=250;levy(state,c,count);
+      const draftGold=monthly(state)?34:100,draftFood=monthly(state)?84:250;
+      if(!player&&c.gold>=draftGold&&c.food>=draftFood&&c.troops<mobilizationLimit(c)&&estate.unrest<65&&estate.famine<25&&!estate.uprising) {
+        const count=Math.min(monthly(state)?54:160,mobilizationLimit(c)-c.troops);c.gold-=draftGold;c.food-=draftFood;levy(state,c,count);
         estate.laborDisruption=clamp(estate.laborDisruption+count/Math.max(1,c.population)*150,0,100);
       }
     }
-    const ledger={turn:state.turn,year:state.year,season:state.season,goldBefore,goldAfter:state.gold,foodBefore,foodAfter:state.food,
-      ...n,harvest,goldDeficit,foodDeficit,castles:forecast.castles.filter(c=>c.clan===state.playerClan)};
+    const ledger={turn:state.turn,year:state.year,season:state.season,...(monthly(state)?{month:state.month}:{}),goldBefore,goldAfter:state.gold,foodBefore,foodAfter:state.food,
+      ...n,harvest,goldDeficit,foodDeficit,castles:forecast.castles.filter(c=>c.clan===state.playerClan).map(c=>state.tenka.estates[c.castleId].lastLedger),
+      events:clone(state.tenka.disasters.filter(e=>e.turn===state.turn&&state.castles.some(c=>c.id===e.castleId&&c.clan===state.playerClan)))};
     state.tenka.economy.ledger=[ledger,...state.tenka.economy.ledger].slice(0,16);
     state.tenka.economy.lastSettledTurn=state.turn;
-    state.tenka.turnReports.push(`領国収支：年貢 ${n.taxIncome}貫・商業 ${n.commerceIncome}貫、軍維持 ${n.militaryUpkeep}貫・施設維持 ${n.maintenance}貫・工事 ${n.projectUpkeep}貫。差引 ${n.netIncome>=0?'+':''}${n.netIncome}貫。兵糧維持 ${n.foodUpkeep}石${harvest?`、秋の収穫 ${harvest}石`:''}。`);
+    state.tenka.turnReports.push(`領国収支（${monthly(state)?'一か月':'三か月'}）：年貢 ${n.taxIncome}貫・商業 ${n.commerceIncome}貫、軍給 ${n.militaryUpkeep}貫・施設維持 ${n.maintenance}貫・工事 ${n.projectUpkeep}貫。差引 ${n.netIncome>=0?'+':''}${n.netIncome}貫。兵糧支給 ${n.foodUpkeep}石${harvest?`、秋の収穫 ${harvest}石`:''}。`);
     if(goldDeficit||foodDeficit)state.tenka.turnReports.push(`不足：金 ${goldDeficit}貫・兵糧 ${foodDeficit}石。軍の士気${foodDeficit?'と兵力':''}が低下。軽税・解兵・兵糧購入で再建できます。`);
     return {...n,harvest,shortage:foodDeficit>0,goldDeficit,foodDeficit,castles:forecast.castles};
   }
@@ -269,7 +376,7 @@
     const roster = s.officers.filter(o => o.clan === s.playerClan && o.status === 'active');
     const adults = roster.filter(o => adult(s, o)), available = adults.filter(o => isOfficerAvailable(s, o));
     const reason = available.length ? null : adults.length ? 'all-busy' : roster.length ? 'underage' : 'no-officers';
-    const message = reason === 'all-busy' ? '成人武将は全員今季の任務中です。奉行衆に政務を任せるか、登用・次の季節で家臣の手を空けられます。'
+    const message = reason === 'all-busy' ? `成人武将は全員今${periodLabel(s)}の任務中です。奉行衆に政務を任せるか、登用・次の${monthly(s)?'月':'季節'}で家臣の手を空けられます。`
       : reason === 'underage' ? '出仕できる成人武将がいません。十五歳未満の一門は元服を待ち、奉行衆の政務と武将の登用で領国を支えられます。'
         : reason === 'no-officers' ? '出仕中の自家武将がいません。奉行衆の政務と武将の登用で家臣団を立て直せます。' : '';
     return { available: available.length, totalAdults: adults.length, minors: roster.length - adults.length, reason, message };
@@ -330,7 +437,7 @@
     const s = initialize(input), t = s.tenka, rule = {...ACTIONS[action.type]};
     const postVictory = s.gameOver && s.winner===s.playerClan && ['enlist','release','execute'].includes(action.type);
     const fail = message => ({ ok: false, state: input, message });
-    if (s.actionPoints < 1 && !postVictory) return fail('今季の命令を使い切りました。次の季節へ進めてください。');
+    if (s.actionPoints < 1 && !postVictory) return fail(`今${periodLabel(s)}の命令を使い切りました。次の${monthly(s)?'月':'季節'}へ進めてください。`);
     const c = getCastle(s, action.castleId || s.selectedCastleId);
     const availability = officerAvailability(s), fallback = administrationFallback(s, availability);
     const administrative = action.officerId === ADMINISTRATION_ID;
@@ -339,7 +446,7 @@
     if (administrative && !delegate) return fail('未任務の成人武将がいるため、その武将を担当に選んでください。');
     if (!delegate || delegate.clan !== s.playerClan || delegate.status !== 'active') return fail(availability.message || '活動中の自家武将を担当に選んでください。');
     if (!administrative && !adult(s, delegate)) return fail(`${delegate.name}は十五歳未満で、まだ任務に出仕できません。成人武将を選ぶか、奉行衆に政務を任せてください。`);
-    if (!administrative && !postVictory && !isOfficerAvailable(s, delegate)) return fail(`${delegate.name}は今季の任務中です。未任務の武将を選ぶか、全員任務中なら奉行衆に政務を任せてください。次の季節には任務が解除されます。`);
+    if (!administrative && !postVictory && !isOfficerAvailable(s, delegate)) return fail(`${delegate.name}は今${periodLabel(s)}の任務中です。未任務の武将を選ぶか、全員任務中なら奉行衆に政務を任せてください。次の${monthly(s)?'月':'季節'}には任務が解除されます。`);
     const target = getOfficer(s, action.targetOfficerId);
     const domestic = DOMESTIC_ACTIONS.includes(action.type);
     if (domestic && (!c || c.clan !== s.playerClan)) return fail('自領の城を指定してください。');
@@ -355,8 +462,8 @@
     if (action.type === 'commercial' && t.estates[c.id].commerce >= 10) return fail('この城の商業は最大の十段階です。');
     if(action.type==='tax'&&!TAX_POLICIES.some(p=>p.id===action.policy))return fail('軽税・標準・重税のいずれかを指定してください。');
     if(action.type==='tax'&&t.estates[c.id].taxPolicy===action.policy)return fail('この城は既にその年貢方針です。');
-    if(action.type==='tax'&&t.estates[c.id].policyTurn===s.turn)return fail('この城の年貢方針は今季既に変更しました。次の季節に見直せます。');
-    if(action.type==='sellGrain'&&s.food-rule.food<economyForecast(s).totals.foodUpkeep*2)return fail('売却後に二季分の維持兵糧を残してください。収穫前の飢餓を避ける備蓄が必要です。');
+    if(action.type==='tax'&&t.estates[c.id].policyTurn===s.turn)return fail(`この城の年貢方針は今${periodLabel(s)}既に変更しました。次の${monthly(s)?'月':'季節'}に見直せます。`);
+    if(action.type==='sellGrain'&&s.food-rule.food<economyForecast(s).totals.foodUpkeep*(monthly(s)?6:2))return fail('売却後に六か月分の維持兵糧を残してください。収穫前の飢餓を避ける備蓄が必要です。');
     const demobilized=action.troops??Math.min(500,c?.troops-150);
     if(action.type==='demobilize'&&(!Number.isInteger(demobilized)||demobilized<1||demobilized>c.troops-150))return fail('解兵する人数を整数で指定し、守備兵150人以上を残してください。');
     if (action.type === 'levy' && c.troops >= mobilizationLimit(c)) return fail(`石高による動員上限 ${mobilizationLimit(c).toLocaleString('ja-JP')} 人に達しています。開墾が必要です。`);
@@ -371,33 +478,43 @@
       const increase = Math.round(projectCost.gain*.15);
       c.kokudaka += increase; c.population += Math.round(increase * 0.3); c.morale = clamp(c.morale + 4, 10, 100);
       t.estates[c.id].reclaimed += increase; t.estates[c.id].devastation = Math.max(0, t.estates[c.id].devastation - 5);
+      t.estates[c.id].waterControl=clamp(t.estates[c.id].waterControl+4,0,100);
       t.estates[c.id].projects.push({id:`${c.id}-reclaim-${s.turn}`,type:'reclaim',label:'開墾・治水',startedTurn:s.turn,
-        remaining:projectCost.duration,total:projectCost.duration,workforce:projectCost.workforce,upkeep:projectCost.upkeep,gain:projectCost.gain-increase,status:'工事中'});
-      message = `${delegate.name}が${c.name}の開墾と治水に着工。先行整備で石高 +${increase.toLocaleString('ja-JP')}石、残り +${(projectCost.gain-increase).toLocaleString('ja-JP')}石は${projectCost.duration}季後。労働力 ${projectCost.workforce}人、工事費は毎季 ${projectCost.upkeep}貫。`;
+        remaining:projectCost.duration,total:projectCost.duration,workforce:projectCost.workforce,upkeep:projectCost.upkeep,gain:projectCost.gain-increase,status:'工事中',periodUnit:monthly(s)?'month':'season'});
+      message = `${delegate.name}が${c.name}の開墾と治水に着工。先行整備で石高 +${increase.toLocaleString('ja-JP')}石、残り +${(projectCost.gain-increase).toLocaleString('ja-JP')}石は${projectCost.duration}${periodLabel(s)}後。労働力 ${projectCost.workforce}人、工事費は毎${periodLabel(s)} ${projectCost.upkeep}貫。`;
     } else if (action.type === 'commercial') {
       const estate = t.estates[c.id]; estate.commerce++;
       estate.projects.push({id:`${c.id}-commercial-${s.turn}`,type:'commercial',label:c.coastal?'市・港整備':'市・街道整備',startedTurn:s.turn,
-        remaining:projectCost.duration,total:projectCost.duration,workforce:projectCost.workforce,upkeep:projectCost.upkeep,gain:1,status:'工事中'});
+        remaining:projectCost.duration,total:projectCost.duration,workforce:projectCost.workforce,upkeep:projectCost.upkeep,gain:1,status:'工事中',periodUnit:monthly(s)?'month':'season'});
       const income = commerceIncome(c, estate, t);
-      message = `${delegate.name}が${c.name}の${c.coastal ? '港と市' : '街道と市'}の整備を開始。商業 ${estate.commerce}/10、完成まで${projectCost.duration}季。工事中の仮設市収入は ${income}貫、工事費は毎季 ${projectCost.upkeep}貫、労働力 ${projectCost.workforce}人が必要です。`;
+      message = `${delegate.name}が${c.name}の${c.coastal ? '港と市' : '街道と市'}の整備を開始。商業 ${estate.commerce}/10、完成まで${projectCost.duration}${periodLabel(s)}。工事中の仮設市収入は ${Math.round(income*periodMonths(s)/3)}貫、工事費は毎${periodLabel(s)} ${projectCost.upkeep}貫、労働力 ${projectCost.workforce}人が必要です。`;
     } else if (action.type === 'levy') {
       const count = Math.min(350 + power * 5, mobilizationLimit(c) - c.troops);
       levy(s, c, count); c.morale = clamp(c.morale + 3, 10, 100);
       t.estates[c.id].laborDisruption=clamp(t.estates[c.id].laborDisruption+count/Math.max(1,c.population)*250,0,100);
-      message = `${delegate.name}が${c.name}で足軽 ${count} 人を募りました。石高動員上限 ${mobilizationLimit(c)} 人。農村の人手が減り、秋の収穫見込は ${estateBudget(s,c).harvest}石、兵糧維持は毎季 ${estateBudget(s,c).foodUpkeep}石です。`;
+      message = `${delegate.name}が${c.name}で足軽 ${count} 人を募りました。石高動員上限 ${mobilizationLimit(c)} 人。農村の人手が減り、秋の収穫見込は ${estateBudget(s,c).harvest}石、兵糧支給は毎${periodLabel(s)} ${estateBudget(s,c).foodUpkeep}石です。`;
     } else if(action.type==='tax') {
       const estate=t.estates[c.id],policy=TAX_POLICIES.find(p=>p.id===action.policy);estate.taxPolicy=policy.id;estate.policyTurn=s.turn;
       message=`${delegate.name}が${c.name}の年貢を${policy.label}に変更。${policy.description}`;
     } else if(action.type==='relief') {
       const estate=t.estates[c.id];estate.unrest=Math.max(0,estate.unrest-18);estate.devastation=Math.max(0,estate.devastation-4);c.morale=clamp(c.morale+7,10,100);
-      message=`${c.name}の領民に兵糧600石を分配。領民の不満 -18、荒廃 -4、城の士気 +7。`;
+      estate.famine=Math.max(0,estate.famine-28);estate.epidemic=Math.max(0,estate.epidemic-8);
+      if(estate.uprising)estate.uprising.strength=Math.max(0,estate.uprising.strength-18);
+      message=`${c.name}の領民に兵糧600石を分配。領民の不満 -18、飢饉 -28、疫病 -8、荒廃 -4、城の士気 +7。`;
+    } else if(action.type==='waterworks') {
+      const estate=t.estates[c.id],gain=12+Math.floor(power/12);estate.waterControl=clamp(estate.waterControl+gain,0,100);
+      estate.cropDamage=Math.max(0,estate.cropDamage-5);estate.devastation=Math.max(0,estate.devastation-3);
+      message=`${delegate.name}が${c.name}の堤防と用水路を整備。治水 +${gain}（${Math.round(estate.waterControl)}/100）、田畑被害 -5。洪水と日照りの危険が下がりました。`;
+    } else if(action.type==='sanitation') {
+      const estate=t.estates[c.id];estate.epidemic=Math.max(0,estate.epidemic-30);estate.unrest=Math.max(0,estate.unrest-6);estate.famine=Math.max(0,estate.famine-5);
+      message=`${delegate.name}が${c.name}の水場清掃と救護を手配。疫病 -30、飢饉 -5、不満 -6。`;
     } else if(action.type==='buyGrain') {
       s.food+=1200;message=`金400貫で兵糧1,200石を買い入れました。領国の備蓄は ${s.food.toLocaleString('ja-JP')}石です。`;
     } else if(action.type==='sellGrain') {
-      s.gold+=300;message=`余剰兵糧1,200石を売却し、金300貫を得ました。二季分以上の維持兵糧を確保しています。`;
+      s.gold+=300;message=`余剰兵糧1,200石を売却し、金300貫を得ました。六か月分以上の維持兵糧を確保しています。`;
     } else if(action.type==='demobilize') {
       loseTroops(s,c,demobilized);t.estates[c.id].laborDisruption=Math.max(0,t.estates[c.id].laborDisruption-12);c.morale=clamp(c.morale+2,10,100);
-      message=`${c.name}の兵 ${demobilized}人を解兵し、農村へ戻しました。兵糧維持は毎季 ${estateBudget(s,c).foodUpkeep}石、秋の収穫見込 ${estateBudget(s,c).harvest}石。`;
+      message=`${c.name}の兵 ${demobilized}人を解兵し、農村へ戻しました。兵糧支給は毎${periodLabel(s)} ${estateBudget(s,c).foodUpkeep}石、秋の収穫見込 ${estateBudget(s,c).harvest}石。`;
     } else if (action.type === 'reward') {
       const gain = 15 + Math.floor(power / 7);
       t.loyalty[target.id] = clamp(t.loyalty[target.id] + gain, 0, 100);
@@ -406,7 +523,7 @@
       const gain = 14 + Math.floor(power / 5);
       s.relations[targetClan] = clamp((s.relations[targetClan] || 0) + gain, -100, 100);
       const clanName = owned(s, targetClan)[0].clanName;
-      if (s.relations[targetClan] >= 75) { s.alliances.push(targetClan); s.allianceExpires[targetClan] = s.turn + 4; s.prestige = clamp(s.prestige + 5, 0, 100); }
+      if (s.relations[targetClan] >= 75) { s.alliances.push(targetClan); s.allianceExpires[targetClan] = s.turn + (monthly(s)?12:4); s.prestige = clamp(s.prestige + 5, 0, 100); }
       message = `${delegate.name}が${clanName}と交渉。友好 ${s.relations[targetClan]}。${s.alliances.includes(targetClan) ? '四季の同盟が成立しました。' : '友好75以上で同盟が成立します。'}`;
     } else if (action.type === 'infiltrate') {
       const tc = getCastle(s, target.castleId), loyal = t.loyalty[target.id], exhausted = tc && (tc.morale < 50 || tc.troops < mobilizationLimit(tc) * 0.4);
@@ -511,9 +628,9 @@
     if(!economicallySettled) {t.turnReports=[];progressEstates(s);}
     let commerce = 0;
     for (const c of s.castles) {
-      const estate = t.estates[c.id], income = commerceIncome(c, estate, t);
+      const estate = t.estates[c.id], income = Math.round(commerceIncome(c, estate, t)*periodMonths(s)/3);
       if(!economicallySettled) {if (c.clan === s.playerClan) commerce += income; else c.gold += income;}
-      estate.devastation = Math.max(0, estate.devastation - 6);
+      estate.devastation = Math.max(0, estate.devastation - 2*periodMonths(s));
     }
     s.gold += commerce;
     if (commerce) t.turnReports.push(`商業・港の追加収入 金 ${commerce} 貫。基本の年貢・秋の収穫・軍維持費は領国収支に計上済みです。`);
@@ -541,8 +658,8 @@
       } else t.turnReports.push(`${enemy.clanName}が疲弊した${c.name}へ調略。${target.name}の忠誠 -${loss}、城の士気 -5。`);
     }
     for (const e of EVENTS) {
-      if (t.events.includes(e.id) || e.year * 4 + e.season > point(s)) continue;
-      const isCurrent = e.year * 4 + e.season === point(s);
+      if (t.events.includes(e.id) || eventPoint(e) > point(s)) continue;
+      const isCurrent = eventPoint(e) === point(s);
       const result = isCurrent ? applyEvent(s, e) : '過去の出来事を年表に補完。過去の効果を遡って適用しません。';
       t.events.push(e.id);
       t.chronicle.push({ ...e, status: isCurrent ? 'occurred' : 'past', date: `${e.year}年 ${SEASONS[e.season]}`, result });
@@ -591,8 +708,10 @@
         consume(s, b.defenderClan, target?.clan === b.defenderClan ? target : owned(s, b.defenderClan)[0], Math.round(defenderTroops * 0.08 * (b.mode === 'siege' ? 2 : 1)), `${b.defender || '守備軍'}・${defenderTroops}人の防衛`);
       }
       if (target) {
+        const before=estateBudget(s,target).harvest;
         t.estates[target.id].devastation = clamp(t.estates[target.id].devastation + (b.mode === 'siege' ? 18 : 9), 0, 100);
         t.estates[target.id].laborDisruption=clamp(t.estates[target.id].laborDisruption+12,0,100);
+        estateEvent(s,target,'war-damage','戦禍による田畑の荒廃',`軍勢の通行と戦闘で農作業が滞り、秋の収穫見込が${Math.max(0,before-estateBudget(s,target).harvest)}石減少。開墾・救済と平穏な月日の経過で回復します。`,{battleId:b.id});
       }
       if (source) {
         t.estates[source.id].devastation = clamp(t.estates[source.id].devastation + 4, 0, 100);
@@ -679,8 +798,12 @@
       castles: s.castles.map(c => {
         const estate=t.estates[c.id],forecast=economy.castles.find(item=>item.castleId===c.id);
         return { ...c, capacity: mobilizationLimit(c), agriculture: estate.reclaimed, commerce: estate.commerce,
-          order: 100 - estate.devastation, income: commerceIncome(c, estate, t),
+          order: 100 - estate.devastation, income: forecast.commerceIncome,
           economy:{taxPolicy:estate.taxPolicy,taxLabel:TAX_POLICIES.find(p=>p.id===estate.taxPolicy).label,unrest:estate.unrest,
+            publicOrder:Math.round(100-estate.unrest),waterControl:Math.round(estate.waterControl),devastation:Math.round(estate.devastation),cropDamage:Math.round(estate.cropDamage),
+            famine:Math.round(estate.famine),epidemic:Math.round(estate.epidemic),uprising:clone(estate.uprising),
+            risks:Object.fromEntries(Object.entries(climateRisks(s,c,estate)).map(([kind,chance])=>[kind,Math.round(chance*1000)/10])),
+            events:clone(t.disasters.filter(e=>e.castleId===c.id).slice(0,12)),
             laborEfficiency:forecast.laborEfficiency,laborAvailable:forecast.laborAvailable,workforce:forecast.workforce,
             developmentCapacity:developmentCapacity(c,estate),reclaimed:estate.reclaimed,projects:clone(estate.projects),
             forecast,costs:{reclaim:developmentCost(s,c,'reclaim'),commercial:developmentCost(s,c,'commercial')},lastLedger:estate.lastLedger||null}};
@@ -690,8 +813,8 @@
       chronicle: t.chronicle.map(e => ({ ...e, kind: e.status === 'past' ? 'past' : 'history', source: SOURCES.find(source => source.id === e.source) })).sort((a, b) => b.year - a.year || b.season - a.season),
       upcomingEvents: EVENTS.filter(e => !t.events.includes(e.id)).slice(0, 3),
       relations: Object.entries(s.relations || {}).map(([clan, value]) => ({ clan, clanName: owned(s, clan)[0]?.clanName || clan, value, allied: s.alliances.includes(clan), expires: s.allianceExpires[clan] || null, castles: owned(s, clan).length })),
-      reports: t.turnReports, actions: ACTIONS, economy,
-      totals: { commerce: owned(s).reduce((n, c) => n + commerceIncome(c, t.estates[c.id], t), 0), capacity: owned(s).reduce((n, c) => n + mobilizationLimit(c), 0) }
+      reports: t.turnReports, actions: ACTIONS, economy,regionalEvents:clone(t.disasters),
+      totals: { commerce: economy.totals.commerceIncome, capacity: owned(s).reduce((n, c) => n + mobilizationLimit(c), 0) }
     };
   }
   function chooseClan(input, clanId) {
@@ -705,7 +828,7 @@
     for (const other of new Set(s.castles.map(c => c.clan))) if (other !== clanId) s.relations[other] = 0;
     for (const pair of s.npcPacts || []) if (pair.includes(clanId)) {
       const other = pair.find(c => c !== clanId);
-      if (other) { s.alliances.push(other); s.allianceExpires[other] = s.turn + 4; s.relations[other] = 75; }
+      if (other) { s.alliances.push(other); s.allianceExpires[other] = s.turn + (monthly(s)?12:4); s.relations[other] = 75; }
     }
     append(s, 'scenario', '天下への旗を掲げる', `${castles[0].clanName}の領国経営を開始。家臣に命令を託し、内政・外交・合戦で天下統一を目指します。`);
     return { ok: true, state: s, message: `${castles[0].clanName}で開始しました。` };

@@ -1,4 +1,4 @@
-/* 天下布武: each castle issues three commands in a season. */
+/* 天下布武: each castle issues three commands in a month. */
 (function (root, factory) {
   const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -53,8 +53,8 @@
     const entries = {};
     for (const item of state.castles || []) {
       const previous = prior?.castles?.[item.id];
-      // A captured castle has spent this season restoring its command chain.
-      // Retaking it cannot refill commands; every castle refreshes next season.
+      // A captured castle spends this month restoring its command chain.
+      // Retaking it cannot refill commands; every castle refreshes next month.
       const value = refresh ? LIMIT : !prior ? (item.clan === state.playerClan ? points(state.actionPoints) : LIMIT)
         : previous?.clan === item.clan && prior.turn === state.turn ? points(previous.remaining) : 0;
       entries[item.id] = { clan: item.clan, remaining: value };
@@ -81,7 +81,7 @@
       try { result = invoke(state); } finally { inCommand--; }
       if (!result?.ok) {
         if (result && source && remaining(input, source.id) === 0 && /命令|行動力/.test(result.message || '')) {
-          return failure(input, `${source.name || source.id}の今季の行動力は残り0／3です。他の城を選ぶか、次の季節へ進めてください。`);
+          return failure(input, `${source.name || source.id}の今月の行動力は残り0／3です。他の城を選ぶか、次の月へ進めてください。`);
         }
         return result ? { ...result, state: input } : result;
       }
@@ -134,7 +134,7 @@
     if (root.TenkaSystems?.act) {
       const act = root.TenkaSystems.act;
       root.TenkaSystems.act = (state, action = {}) => {
-        const domestic = ['reclaim', 'commercial', 'levy', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize'].includes(action.type);
+        const domestic = ['reclaim', 'commercial', 'levy', 'tax', 'relief', 'buyGrain', 'sellGrain', 'demobilize', 'waterworks', 'sanitation'].includes(action.type);
         const target = action.castleId || state.selectedCastleId;
         const explicit = action.orderCastleId ?? action.sourceId;
         if (domestic && explicit != null && explicit !== target) return failure(state, '内政・徴兵は対象の城自身の行動力で命じてください。');

@@ -10,6 +10,7 @@
   const castle = (state, id) => state?.castles?.find(item => item.id === id);
   const total = units => TYPES.reduce((sum, type) => sum + (units[type] || 0), 0);
   const clone = value => JSON.parse(JSON.stringify(value));
+  const date = state => root.TenkaCalendar?.date?.(state) || (Number.isInteger(state.month) ? `${state.year}年 ${state.month}月` : `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}`);
   const failure = (state, message) => ({ ok: false, state, message });
   function blocked(state) {
     if (state.gameOver) return 'この年代記は決着しました。';
@@ -57,7 +58,7 @@
     if (!reason && (!source || !destination || source.clan !== state.playerClan || destination.clan !== state.playerClan)) reason = '出発元と集結先には自領の城を選んでください。';
     if (!reason && (source.id === destination.id || !source.neighbors?.includes(destination.id))) reason = '街道・海路で直接つながる周辺の自領から集兵してください。';
     if (!reason && route === 'sea' && (!source.coastal || !destination.coastal || units.navy < 100)) reason = '海路での集兵には両城の港と、出発元の水軍100人以上が必要です。';
-    if (!reason && remaining < 1) reason = `${source.name}の今季の行動力がありません。`;
+    if (!reason && remaining < 1) reason = `${source.name}の今月の行動力がありません。`;
     if (!reason && space < 1) reason = `${destination.name}は石高・人口に応じた収容上限です。開墾するか、兵を他城へ移してください。`;
     if (!reason && maxTroops < 1) reason = '守備兵・輸送兵糧を確保できる集兵人数がありません。';
     const troops = action.troops;
@@ -93,7 +94,7 @@
     const message = `${source.name}から${destination.name}へ${action.troops.toLocaleString('ja-JP')}人を${view.routeLabel}で集兵しました。兵糧${view.food}石、${source.name}の行動力1回を使用。武将の所属は変わりません。`;
     state.nextLogId = Math.max(1, Number(state.nextLogId) || 1);
     state.logs = [{ id: `transfer-${state.nextLogId++}`, type: 'military', title: '周辺の城から集兵', text: message,
-      date: `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}` }, ...(state.logs || [])].slice(0, 80);
+      date: date(state) }, ...(state.logs || [])].slice(0, 80);
     return { ok: true, state: root.TenkaOrders.sync(state), message, movedUnits: clone(view.units) };
   }
   return { version: 1, preview, getView, act, foodCost };

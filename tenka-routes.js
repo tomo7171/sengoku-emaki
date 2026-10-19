@@ -34,7 +34,7 @@
         : root.TenkaAllies?.hasPendingRequests?.(state) ? '同盟国からの援軍要請に返答してください。' : '';
     const committed = state.tenka?.allies?.committed || [];
     if (!reason && committed.length && !committed.some(item => item.sourceId === source.id && item.targetId === target.id && !item.defending)) reason = '合流済みの援軍がいる戦場へ出陣するか、援軍を帰還させてください。';
-    if (!reason && (root.TenkaOrders?.remaining?.(state, source.id) ?? state.actionPoints ?? 0) < 1) reason = `${source.name}の今季の行動力がありません。`;
+    if (!reason && (root.TenkaOrders?.remaining?.(state, source.id) ?? state.actionPoints ?? 0) < 1) reason = `${source.name}の今月の行動力がありません。`;
     if (!reason && (state.gold < 120 || state.food < 600)) reason = '出陣には金120貫・兵糧600石以上が必要です。';
     if (!reason && !native?.canAttack) reason = source.routes?.[target.id] === 'sea'
       ? '海路は港・水軍100人以上と輸送できる編制兵600人以上が必要です。'

@@ -8,6 +8,10 @@ Campaign fixtures use production save validation. Battles and cameras are opened
 through the actual UI. A test-only route exposes the private renderer and model
 registry so the gate's visible state can be checked without adding debug exports
 to the shipped game. The capture check uses the production simulation and ledger.
+
+This compatibility harness explicitly uses the earlier real-time battle mode;
+monthly-turns-browser.py separately verifies current live player-planned turns
+in field, siege and defensive battles. No production mode or rule is changed.
 """
 import argparse
 import json
@@ -51,6 +55,10 @@ def instrumented_html():
     marker = '(0,zv.createRoot)(document.getElementById(`root`))'
     assert marker in html, 'Find the production React bootstrap'
     observe = """
+// Test-only legacy record compatibility; current live turns are checked by monthly-turns-browser.py.
+const legacyBattleCreate=Xn,legacyBattleDefense=window.TenkaTactics.createDefense;
+Xn=options=>legacyBattleCreate({...options,controlMode:undefined});
+window.TenkaTactics.createDefense=(state,threat,options={})=>legacyBattleDefense(state,threat,{...options,controlMode:undefined});
 const castleTestTextureFactory=window.TenkaFortressMaterials.createTextures;
 window.TenkaFortressMaterials={...window.TenkaFortressMaterials,createTextures:(...args)=>{
  const maps=castleTestTextureFactory(...args);

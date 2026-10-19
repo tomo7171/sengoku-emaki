@@ -4,6 +4,10 @@
 Fixtures use valid campaign saves and the shipped aid queue. The actual native
 war adapter, UI actions, resource accounting and 3D battle renderer run without
 mocks. Renderer observations are injected into the test response only.
+
+This compatibility harness explicitly uses the earlier real-time battle mode;
+monthly-turns-browser.py separately verifies current live player-planned turns
+in field, siege and defensive battles. No production mode or rule is changed.
 """
 import argparse
 import json
@@ -21,6 +25,10 @@ def instrumented_html():
     marker = '(0,zv.createRoot)(document.getElementById(`root`))'
     assert html.count(marker) == 1
     observe = """
+// Test-only legacy record compatibility; current live turns are checked by monthly-turns-browser.py.
+const legacyBattleCreate=Xn,legacyBattleDefense=window.TenkaTactics.createDefense;
+Xn=options=>legacyBattleCreate({...options,controlMode:undefined});
+window.TenkaTactics.createDefense=(state,threat,options={})=>legacyBattleDefense(state,threat,{...options,controlMode:undefined});
 const allianceTestRenderer=G_;
 G_=(mount,options)=>{
  const renderer=allianceTestRenderer(mount,options),update=renderer.update;
@@ -35,7 +43,7 @@ G_=(mount,options)=>{
 FIXTURE = """kind=>{
  const G=window.TenkaGame,A=window.TenkaAllies;
  let s=G.newGame();s.selectedCastleId='kiyosu';s.gold=100000;s.food=100000;
- s.alliances=['matsudaira'];s.allianceExpires={matsudaira:s.turn+4};s.relations.matsudaira=80;
+ s.alliances=['matsudaira'];s.allianceExpires={matsudaira:s.turn+12};s.relations.matsudaira=80;
  const setArmy=(id,units)=>{const c=s.castles.find(c=>c.id===id);c.troops=Object.values(units).reduce((a,b)=>a+b,0);s.armies[id].units={...units};c.food=100000;c.gold=100000;};
  const units=(ashigaru,archer=0,cavalry=0,firearm=0)=>({ashigaru,archer,cavalry,firearm,navy:0});
  setArmy('kiyosu',units(2600,800,400,1200));setArmy('inuyama',units(1500,600,500,600));
@@ -242,6 +250,7 @@ def outgoing_aid(page, url, width, shots, passed, defending=False):
     if defending:
         dialog.get_by_role('button', name='閉じる', exact=True).click()
         page.get_by_role('button', name='籠城を指揮する', exact=True).click()
+        page.get_by_role('button', name='この兵糧で籠城を指揮する', exact=True).click()
     else:
         page.get_by_role('button', name='戦場で采配する', exact=True).click()
     battle = page.get_by_test_id('tactical-battle')

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise marriage, diplomatic decisions and estate management in the shipped UI.
 
-Campaign fixtures are validated real saves. All commands, season changes and
+Campaign fixtures are validated real saves. All commands, month changes and
 storage restoration run through production React and campaign engines.
 """
 import argparse
@@ -14,11 +14,11 @@ from playwright.sync_api import expect, sync_playwright
 FIXTURE = """kind=>{
  const G=window.TenkaGame,D=window.TenkaDiplomacy;
  let s=G.newGame();s.selectedCastleId='kiyosu';s.gold=100000;s.food=1000000;s.prestige=90;
- if(kind==='marriage'){s.year=1577;s.turn=69;s.season=0;}
+ if(kind==='marriage'){s.year=1577;s.month=3;s.turn=(1577-1560)*12+1;s.season=0;}
  s=G.migrate(s);
  const clans=[...new Set(s.castles.map(c=>c.clan))];
  s.npcPacts=clans.flatMap((first,index)=>clans.slice(index+1).map(second=>[first,second]));
- s.alliances=['matsudaira'];s.allianceExpires={matsudaira:s.turn+4};s.relations.matsudaira=85;
+ s.alliances=['matsudaira'];s.allianceExpires={matsudaira:s.turn+12};s.relations.matsudaira=85;
  if(kind==='marriage')for(const c of s.castles.filter(c=>c.clan==='matsudaira')){
   c.troops=150;s.armies[c.id].units={ashigaru:150,archer:0,cavalry:0,firearm:0,navy:0};
  }
@@ -117,7 +117,7 @@ def marriage_and_break(page, url, width, shots, passed):
     assert broken['prestige'] == married['prestige'] - 10
     assert remaining(broken, 'inuyama') == 1
     assert next(o for o in broken['officers'] if o['id'] == 'oda_tokuhime')['marriedTo'] == spouse['id']
-    panel.get_by_role('button', name='次の季節へ →', exact=True).click()
+    panel.get_by_role('button', name='次の月へ →', exact=True).click()
     page.wait_for_function('turn=>window.TenkaGame.load().turn>turn', arg=broken['turn'])
     advanced = saved(page)
     assert 'matsudaira' not in advanced['alliances']
@@ -126,7 +126,7 @@ def marriage_and_break(page, url, width, shots, passed):
     restored = saved(page)
     assert 'matsudaira' not in restored['alliances']
     assert next(o for o in restored['officers'] if o['id'] == 'oda_tokuhime')['marriedTo'] == spouse['id']
-    passed(f'{width}px: actual allied spouse selection; review/cancel/confirm alliance break; real costs, surviving marriage and no seasonal alliance renewal after reload')
+    passed(f'{width}px: actual allied spouse selection; review/cancel/confirm alliance break; real costs, surviving marriage and no monthly alliance renewal after reload')
 
 
 def submission(page, url, width, shots, passed):
@@ -159,22 +159,22 @@ def construction(page, url, width, shots, passed):
     before = resume(page, url, 'estate')
     panel = council(page)
     estate = panel.get_by_role('region', name='領国の経営計画', exact=True)
-    expect(estate).to_contain_text('全領国の季節収支')
+    expect(estate).to_contain_text('全領国の月間収支')
     expect(estate).to_contain_text('農作業の効率')
-    expect(estate).to_contain_text('完成まで 3 季')
+    expect(estate).to_contain_text('完成まで 9 か月')
     no_overflow(page, estate)
     estate.screenshot(path=str(shots / f'{width}-estate-budget.png'))
     estate.get_by_role('button', name='田畑の開墾に着手', exact=True).click()
     page.wait_for_function("window.TenkaGame.load().tenka.estates.kiyosu.projects.some(p=>p.type==='reclaim')")
     started = saved(page)
     project = next(p for p in started['tenka']['estates']['kiyosu']['projects'] if p['type'] == 'reclaim')
-    assert project['remaining'] == 3
+    assert project['remaining'] == 9
     assert started['gold'] == before['gold'] - 300 and remaining(started, 'kiyosu') == 2
     assert remaining(started, 'inuyama') == 3
-    expect(estate).to_contain_text('完成まであと 3 / 3 季')
+    expect(estate).to_contain_text('完成まであと 9 / 9 か月')
     expect(estate.get_by_role('button', name='田畑の開墾に着手', exact=True)).to_be_disabled()
-    for i in range(3):
-        panel.get_by_role('button', name='次の季節へ →', exact=True).click()
+    for i in range(9):
+        panel.get_by_role('button', name='次の月へ →', exact=True).click()
         page.wait_for_function('turn=>window.TenkaGame.load().turn===turn', arg=started['turn'] + i + 1)
     complete = saved(page)
     assert not complete['tenka']['estates']['kiyosu']['projects']
@@ -183,7 +183,7 @@ def construction(page, url, width, shots, passed):
     expect(estate).to_contain_text('現在、進行中の工事はありません')
     no_overflow(page, estate)
     estate.screenshot(path=str(shots / f'{width}-completed-estate.png'))
-    passed(f'{width}px: forecast, reserves, workforce and project costs visible; actual reclamation finishes after three UI-driven seasons and balances are recorded')
+    passed(f'{width}px: forecast, reserves, workforce and project costs visible; actual reclamation finishes after nine UI-driven months and balances are recorded')
 
 
 def policy_and_stocks(page, url, width, shots, passed):
@@ -209,7 +209,7 @@ def policy_and_stocks(page, url, width, shots, passed):
     assert remaining(after, 'kiyosu') == 0 and remaining(after, 'inuyama') == 3
     assert after['gold'] == before['gold'] - 400
     assert after['food'] == before['food'] + 1200
-    expect(estate).to_contain_text('今季変更済み')
+    expect(estate).to_contain_text('今月変更済み')
     expect(estate.get_by_role('button', name='田畑の開墾に着手', exact=True)).to_be_disabled()
     no_overflow(page, estate)
     estate.screenshot(path=str(shots / f'{width}-policy-and-demobilization.png'))
@@ -231,7 +231,7 @@ def policy_and_stocks(page, url, width, shots, passed):
     expect(estate.get_by_role('button', name='兵糧を売却する', exact=True)).to_be_disabled()
     expect(estate).to_contain_text('売却後に残す備蓄')
     no_overflow(page, estate)
-    passed(f'{width}px: deliberate tax choice, one-season policy guard, real buy/sell/relief costs, integer demobilization, independent castle orders and two-season grain reserve')
+    passed(f'{width}px: deliberate tax choice, one-month policy guard, real buy/sell/relief costs, integer demobilization, independent castle orders and two-month grain reserve')
 
 
 def estate_viewport(page, url, width, shots, passed):

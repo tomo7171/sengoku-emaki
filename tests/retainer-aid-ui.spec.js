@@ -60,10 +60,10 @@ test('busy and exhausted officers remain visible with a reason and cannot be sta
  const props={state},screen=renderer(env,'RetainerStations',props),tree=screen.render();
  assert.equal(control(tree,'select','織田信長の配置先の城').props.disabled,true);
  assert.equal(control(tree,'button','織田信長を城に配置').props.disabled,true);
- assert.match(content(tree),/今季の任務中/);assert.match(content(tree),/今季の行動力は残り0／3/);
+ assert.match(content(tree),/今月の任務中/);assert.match(content(tree),/今月の行動力は残り0／3/);
  const before=clone(props.state);
  control(tree,'button','織田信長を城に配置').props.onClick();
- assert.deepEqual(clone(props.state),before);assert.match(content(screen.render()),/今季の任務中/);
+ assert.deepEqual(clone(props.state),before);assert.match(content(screen.render()),/今月の任務中/);
 });
 
 test('an incoming allied offensive requires the player to choose the source and an integer count before sending',()=>{

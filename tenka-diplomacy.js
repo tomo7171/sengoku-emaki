@@ -6,6 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
   const clone = value => JSON.parse(JSON.stringify(value));
+  const date = state => root.TenkaCalendar?.date?.(state) || (Number.isInteger(state.month) ? `${state.year}年 ${state.month}月` : `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}`);
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const owned = (state, clan = state.playerClan) => (state.castles || []).filter(item => item.clan === clan);
   const person = (state, id) => state.officers?.find(item => item.id === id);
@@ -41,7 +42,7 @@
   function append(state, title, text, details = {}) {
     state.nextLogId = Math.max(1, state.nextLogId || 1);
     state.logs = [{ id: `diplomacy-${state.nextLogId++}`, type: 'diplomacy', title, text,
-      date: `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}` }, ...(state.logs || [])].slice(0, 80);
+      date: date(state) }, ...(state.logs || [])].slice(0, 80);
     const ledger = state.tenka.diplomacy;
     ledger.history.unshift({ turn: state.turn, year: state.year, title, message: text, ...details });
     ledger.history = ledger.history.slice(0, 80);
@@ -62,7 +63,7 @@
       if ([id, item.overlord].includes(state.playerClan)) {
         const other = id === state.playerClan ? item.overlord : id;
         if (!state.alliances.includes(other)) state.alliances.push(other);
-        state.allianceExpires[other] = Math.max(state.allianceExpires[other] || 0, state.turn + 4);
+        state.allianceExpires[other] = Math.max(state.allianceExpires[other] || 0, state.turn + (Number.isInteger(state.month) ? 12 : 4));
       }
     }
     ledger.attempts = ledger.attempts.filter(item => item.turn === state.turn);
@@ -124,7 +125,7 @@
   function remaining(state, id) { return root.TenkaOrders?.remaining?.(state, id) ?? state.actionPoints ?? 0; }
   function delegateReason(state, item) {
     if (!item || item.clan !== state.playerClan || item.status !== 'active' || female(item) || item.capturedBy || age(state, item) == null || age(state, item) < 15) return '十五歳以上の活動中の自家武将を使者に選んでください。';
-    return state.tenka?.assignments?.[item.id]?.turn === state.turn ? `${item.name}は今季の任務中です。` : '';
+    return state.tenka?.assignments?.[item.id]?.turn === state.turn ? `${item.name}は今月の任務中です。` : '';
   }
   function power(state, clan) { return owned(state, clan).reduce((sum, item) => sum + Math.max(0, item.troops || 0), 0); }
   function preview(input, action = {}) {
@@ -136,7 +137,7 @@
     const state = initialize(input), blocked = blockedMessage(state); if (blocked) return failed(blocked);
     const source = sourceCastle(state, action.orderCastleId ?? action.sourceId);
     if (!source || source.clan !== state.playerClan) return failed('命令を出す自領の城を選んでください。');
-    if (remaining(state, source.id) < 1) return failed(`${source.name}の今季の行動力は残り0／3です。`);
+    if (remaining(state, source.id) < 1) return failed(`${source.name}の今月の行動力は残り0／3です。`);
     if (state.gold < cost.gold) return failed(`金${cost.gold}貫が必要です。`);
     const targetClan = action.targetClan;
     if (!targetClan || targetClan === state.playerClan || !owned(state, targetClan).length) return failed('健在な他家を選んでください。');
@@ -159,7 +160,7 @@
     const reason = delegateReason(state, person(state, action.officerId)); if (reason) return failed(reason);
     if (overlord(state, targetClan)) return failed('この家は既に他家へ恭順しています。');
     if (overlord(state, state.playerClan)) return failed('他家へ恭順中は、さらに他家を従わせられません。');
-    if (state.tenka.diplomacy.attempts.some(item => item.targetClan === targetClan && item.turn === state.turn)) return failed('この家への恭順交渉は今季すでに行いました。');
+    if (state.tenka.diplomacy.attempts.some(item => item.targetClan === targetClan && item.turn === state.turn)) return failed('この家への恭順交渉は今月すでに行いました。');
     const contact = liveAlliance(state, targetClan) || owned(state).some(item => item.neighbors?.some(id => castle(state, id)?.clan === targetClan));
     if (!contact) return failed('国境を接する他家、または同盟国へ恭順を求めてください。');
     const ownPower = power(state, state.playerClan), targetPower = power(state, targetClan), ratio = ownPower / Math.max(1, targetPower);
@@ -167,7 +168,7 @@
     const delegate = person(state, action.officerId), headId = state.tenka?.dynasty?.families?.[targetClan]?.headId;
     const resolve = person(state, headId)?.leadership || 60, relation = state.relations[targetClan] || 0;
     const chance = clamp(Math.round(15 + delegate.politics * .35 + delegate.intelligence * .15 + state.prestige * .2 + relation * .18 + Math.log2(ratio) * 14 - resolve * .25), 10, 90);
-    return { ...result, chance, powerRatio: ratio, message: `成功見込み${chance}%。相手は領地と家臣を保ち、自家への攻撃を停止して毎季貢納します。城の併合にはなりません。` };
+    return { ...result, chance, powerRatio: ratio, message: `成功見込み${chance}%。相手は領地と家臣を保ち、自家への攻撃を停止して毎月貢納します。城の併合にはなりません。` };
   }
   function debit(state, sourceId, cost) {
     state.gold -= cost.gold;
@@ -207,7 +208,7 @@
       if (roll < check.chance) {
         ledger.vassals[target] = { overlord: state.playerClan, active: true, turn: state.turn, year: state.year, lastTributeTurn: state.turn, tributeGold: 0, tributeFood: 0 };
         state.relations[target] = Math.max(60, state.relations[target] || 0); state.prestige = clamp(state.prestige + 4, 0, 100);
-        message = `${delegate.name}の交渉で${clanName(state, target)}が恭順しました。領地・家臣は同家が保持し、双方の侵攻を禁止します。翌季から余剰金・兵糧の一部を貢納します。`;
+        message = `${delegate.name}の交渉で${clanName(state, target)}が恭順しました。領地・家臣は同家が保持し、双方の侵攻を禁止します。翌月から余剰金・兵糧の一部を貢納します。`;
       } else {
         outcome = 'refused'; state.relations[target] = clamp((state.relations[target] || 0) - 10, -100, 100);
         message = `${clanName(state, target)}は恭順の求めを拒否しました（成功見込み${check.chance}%）。友好−10。使者の費用と命令は消費しました。`;
@@ -227,7 +228,10 @@
       if (item.overlord !== state.playerClan) continue;
       let gold = 0, food = 0;
       for (const home of owned(state, clan)) {
-        const dueGold = Math.floor(Math.max(0, (home.gold || 0) - 200) * .05), dueFood = Math.floor(Math.max(0, (home.food || 0) - 1000) * .02);
+        // The old levy was per season. Monthly campaigns collect one third
+        // of that rate, from actual surplus stores, once for each month.
+        const months = Number.isInteger(state.month) ? 3 : 1;
+        const dueGold = Math.floor(Math.max(0, (home.gold || 0) - 200) * .05 / months), dueFood = Math.floor(Math.max(0, (home.food || 0) - 1000) * .02 / months);
         home.gold -= dueGold; home.food -= dueFood; gold += dueGold; food += dueFood;
       }
       state.gold += gold; state.food += food; item.tributeGold += gold; item.tributeFood += food;

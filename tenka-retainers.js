@@ -6,6 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
   const clone = value => JSON.parse(JSON.stringify(value));
+  const date = state => root.TenkaCalendar?.date?.(state) || (Number.isInteger(state.month) ? `${state.year}年 ${state.month}月` : `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}`);
   const castle = (state, id) => state.castles?.find(item => item.id === id);
   const own = (state, item) => !!item && item.clan === state.playerClan;
   const age = (state, officer) => Number.isFinite(officer?.birth) ? state.year - officer.birth : null;
@@ -39,7 +40,7 @@
       return '活動中の自家武将を選んでください。';
     if (female(officer)) return '姫の婚姻と居所は家中の画面で確認してください。';
     if (age(state, officer) == null || age(state, officer) < 15) return '十五歳以上の元服した武将を選んでください。';
-    if (state.tenka?.assignments?.[officer.id]?.turn === state.turn) return `${officer.name}は今季の任務中です。次の季節に配置を変更できます。`;
+    if (state.tenka?.assignments?.[officer.id]?.turn === state.turn) return `${officer.name}は今月の任務中です。来月に配置を変更できます。`;
     if (!own(state, sourceCastle(state, officer))) return '命令を出せる自領の所属城がありません。';
     return movementBlock(state, officer);
   }
@@ -54,7 +55,7 @@
       const source = sourceCastle(state, item), location = castle(state, item.castleId);
       let reason = blockedMessage || officerReason(state, item);
       const commands = source ? remaining(source.id) : 0;
-      if (!reason && commands < 1) reason = `${source.name}の今季の行動力は残り0／3です。次の季節に配置を変更できます。`;
+      if (!reason && commands < 1) reason = `${source.name}の今月の行動力は残り0／3です。来月に配置を変更できます。`;
       return { ...item, age: age(state, item), castleName: location?.name || '未配属',
         sourceCastleId: source?.id || null, sourceCastleName: source?.name || '', remaining: commands,
         busy: state.tenka?.assignments?.[item.id]?.turn === state.turn, available: !reason, reason };
@@ -73,7 +74,7 @@
     if (!root.TenkaOrders?.sync || !root.TenkaOrders?.remaining) return failure(input, '城ごとの命令設定を確認してください。');
     const source = sourceCastle(input, person);
     if (root.TenkaOrders.remaining(input, source.id) < 1) return failure(input,
-      `${source.name}の今季の行動力は残り0／3です。次の季節に配置を変更できます。`);
+      `${source.name}の今月の行動力は残り0／3です。来月に配置を変更できます。`);
     const state = root.TenkaOrders.sync(input, source.id), officer = state.officers.find(item => item.id === person.id);
     // Moving a commander must not leave an army at the old castle led from
     // afar. The destination's commander stays until the player changes it in
@@ -84,7 +85,7 @@
     const message = `${officer.name}を${person.castleId == null ? '未配属' : source.name}から${destination.name}へ配属しました。${source.name}の行動力を1回使用しました。`;
     state.nextLogId = Math.max(1, Number(state.nextLogId) || 1);
     state.logs = [{ id: `retainer-${state.nextLogId++}`, type: 'domestic', title: '武将の城配置', text: message,
-      date: `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}` }, ...(state.logs || [])].slice(0, 80);
+      date: date(state) }, ...(state.logs || [])].slice(0, 80);
     return { ok: true, state: root.TenkaOrders.sync(state), message };
   }
   return { version: 1, configure, initialize, getView, act };

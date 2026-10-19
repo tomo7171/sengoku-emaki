@@ -3,6 +3,10 @@
 
 Only renderer observations are injected. Campaign saves, graph traversal,
 transfers, supply validation and 3D combat are the production implementations.
+
+This compatibility harness explicitly uses the earlier real-time battle mode;
+monthly-turns-browser.py separately verifies current live player-planned turns
+in field, siege and defensive battles. No production mode or rule is changed.
 """
 import argparse
 import json
@@ -20,6 +24,10 @@ def instrumented_html():
     marker = '(0,zv.createRoot)(document.getElementById(`root`))'
     assert html.count(marker) == 1
     observe = """
+// Test-only legacy record compatibility; current live turns are checked by monthly-turns-browser.py.
+const legacyBattleCreate=Xn,legacyBattleDefense=window.TenkaTactics.createDefense;
+Xn=options=>legacyBattleCreate({...options,controlMode:undefined});
+window.TenkaTactics.createDefense=(state,threat,options={})=>legacyBattleDefense(state,threat,{...options,controlMode:undefined});
 const logisticsRenderer=G_;
 G_=(mount,options)=>{
  const renderer=logisticsRenderer(mount,options),update=renderer.update;

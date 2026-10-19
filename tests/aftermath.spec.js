@@ -260,8 +260,8 @@ test('execution records the actual death year and fixed age rather than aging th
   assert.equal(fate(result.state, targetId).outcome, 'captured', 'execution remains a treatment after the capture');
   assert.equal(result.state.tenka.prisonerDecisions[0].type, 'execute');
   const later = clone(result.state);
-  later.year += 30; later.turn += 120;
-  later.allianceExpires = Object.fromEntries(later.alliances.map(id => [id, later.turn + 4]));
+  later.year += 30; later.turn += 360;
+  later.allianceExpires = Object.fromEntries(later.alliances.map(id => [id, later.turn + 12]));
   const loaded = persist(Game.migrate(later));
   assert.equal(Dynasty.age(loaded, person(loaded, targetId)), ageAtDeath);
   assert.equal(person(loaded, targetId).deathYear, state.year);

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Actual Muranaka siege/field UI, recoverable settlement and renderer switching.
+"""Legacy real-time Muranaka records, settlement recovery and renderer switching.
 
 Campaigns are valid native saves, and combat/capture/replay use the shipped
 engines. Test instrumentation observes battle renderers and accelerates real
 ticks. The unrelated campaign map renderer is isolated to avoid compiling its
 nationwide scene in every battle fixture; the actual 2D/3D battle renderers run.
 Only explicit settlement-error cases inject failed responses.
+This compatibility harness explicitly selects the earlier real-time engine so
+old battle ledgers, replay and renderer recovery remain covered. The separate
+monthly-turns-browser.py suite exercises current live turn-based field, siege
+and defensive battles; this harness does not replace those checks.
 """
 import argparse
 import json
@@ -25,6 +29,10 @@ def instrumented_html():
 window.__muranakaSettleCalls=0;window.__muranakaAccelerate=false;
 Mv=()=>new Proxy({},{get:()=>()=>{}});
 const muranakaSettle=ti,muranakaAdvance=ur,muranakaStart=ir;
+// Test-only compatibility mode: preserve coverage of earlier real-time records.
+const muranakaCreate=Xn,muranakaDefense=window.TenkaTactics.createDefense;
+Xn=options=>muranakaCreate({...options,controlMode:undefined});
+window.TenkaTactics.createDefense=(state,threat,options={})=>muranakaDefense(state,threat,{...options,controlMode:undefined});
 ti=(state,battle)=>{
  window.__muranakaSettleCalls++;
  if(window.__muranakaSettlementFailure){
@@ -214,17 +222,17 @@ def completed_battle(page, url, width, mode, failure, shots, passed):
     print('STEP: battle report restored', flush=True)
     assert restored_battle['lastBattle']['id'] == after['lastBattle']['id']
     assert orders(restored_battle) == orders(after)
-    page.get_by_role('button', name=re.compile('^次の季節へ')).click()
+    page.get_by_role('button', name=re.compile('^次の月へ')).click()
     page.wait_for_function('turn=>window.TenkaGame.load().turn===turn+1', arg=before['turn'])
     advanced = saved(page)
-    print('STEP: next season saved', flush=True)
+    print('STEP: next month saved', flush=True)
     page.reload(wait_until='domcontentloaded')
     page.get_by_role('button', name='有馬家の続きから遊ぶ', exact=True).click()
     restored = saved(page)
     assert restored['turn'] == advanced['turn']
     assert restored['lastBattle'] == advanced['lastBattle']
     assert castle(restored, 'muranaka')['clan'] == castle(after, 'muranaka')['clan']
-    passed(f'{width}px {mode}: actual victory settles once, visible result/return, valid save/reload and next season' + (f'; one-shot {failure} retains the battle and retry succeeds' if failure else ''))
+    passed(f'{width}px {mode}: actual victory settles once, visible result/return, valid save/reload and next month' + (f'; one-shot {failure} retains the battle and retry succeeds' if failure else ''))
 
 
 def permanent_failure_recovery(page, url, width, shots, passed):

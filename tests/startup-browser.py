@@ -77,18 +77,18 @@ def main():
         page.get_by_role("button", name="選んだ大名で始める", exact=True).click()
         wait_for_clan(page, "shimazu")
         state = saved_state(page)
-        assert (state["year"], state["turn"]) == (1560, 1)
+        assert (state["year"], state["month"], state["turn"]) == (1560, 3, 1)
         chosen_castle = next(c for c in state["castles"] if c["id"] == state["selectedCastleId"])
         assert chosen_castle["clan"] == "shimazu"
         expect(page.locator(".player-profile")).to_contain_text("島津")
         checks.append("Starting Shimazu creates its own valid campaign, castle and header")
 
-        page.get_by_role("button", name="次の季節へ").click()
+        page.get_by_role("button", name="次の月へ").click()
         page.wait_for_function("() => window.TenkaGame.load()?.turn === 2")
         page.reload(wait_until="domcontentloaded")
         picker = assert_picker(page)
         expect(page.get_by_role("button", name="島津家の続きから遊ぶ", exact=True)).to_be_visible()
-        expect(page.locator(".tenka-start-saved")).to_contain_text("第2季")
+        expect(page.locator(".tenka-start-saved")).to_contain_text("第2月")
         original = raw_storage(page)
         picker.select_option("takeda")
         assert raw_storage(page) == original, "Changing the preview must preserve progressed storage"
@@ -116,7 +116,7 @@ def main():
         page.get_by_role("button", name="武田家で新しく始める", exact=True).click()
         wait_for_clan(page, "takeda")
         state = saved_state(page)
-        assert (state["year"], state["season"], state["turn"]) == (1560, 0, 1)
+        assert (state["year"], state["month"], state["season"], state["turn"]) == (1560, 3, 0, 1)
         assert page.evaluate("() => window.TenkaGame.validate(window.TenkaGame.load())")
         head = page.evaluate("() => window.TenkaDynasty.getView(window.TenkaGame.load()).family.head")
         assert head["name"] == "武田晴信" and head["status"] == "active"

@@ -145,21 +145,21 @@ test('a broke estate pauses construction without removing the project and resume
  assert.equal(state.tenka.estates.a.projects[0].status,'工事中');
 });
 
-test('the real campaign season uses the detailed ledger, saves project state, and keeps every castle command independent',()=>{
+test('the real campaign month uses the detailed ledger, saves project state, and keeps every castle command independent',()=>{
  const {Game,Systems:Live,context}=runtime();let state=Game.newGame();
  // Freeze foreign fronts through actual pacts; the economy test should not
  // make its assertions depend on an opportunistic unrelated native AI war.
  const clans=[...new Set(state.castles.map(c=>c.clan))];state.npcPacts=[];
  for(let a=0;a<clans.length;a++)for(let b=a+1;b<clans.length;b++)if(clans[a]!==state.playerClan&&clans[b]!==state.playerClan)state.npcPacts.push([clans[a],clans[b]]);
- state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+4]));
+ state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+12]));
  const home=state.castles.find(c=>c.id===state.selectedCastleId),other=state.castles.find(c=>c.clan===state.playerClan&&c.id!==home.id);
  const person=Live.getView(state).officers.find(o=>o.available);
  const started=Live.act(state,{type:'commercial',castleId:home.id,orderCastleId:home.id,officerId:person.id});
  assert.equal(started.ok,true);state=started.state;
  assert.equal(context.TenkaOrders.remaining(state,home.id),2);
  if(other)assert.equal(context.TenkaOrders.remaining(state,other.id),3);
- assert.equal(Game.save(state),true);state=Game.load();assert.equal(state.tenka.estates[home.id].projects[0].remaining,2);
- for(let i=0;i<3;i++){
+ assert.equal(Game.save(state),true);state=Game.load();assert.equal(state.tenka.estates[home.id].projects[0].remaining,6);
+ for(let i=0;i<6;i++){
   const before=clone(state),result=Game.season(state);state=result.state;
   const ledger=state.tenka.economy.ledger[0];assert.equal(ledger.turn,state.turn);
   assert.equal(state.gold,before.gold+ledger.income-ledger.upkeep);
@@ -175,7 +175,7 @@ test('new estate policies cannot borrow another castle command or secretly debit
  const {Game,Systems:Live,context}=runtime();const state=Game.newGame();
  const castles=state.castles.filter(c=>c.clan===state.playerClan),home=castles[0],other=castles[1];
  assert.ok(other);const officer=Live.getView(state).officers.find(o=>o.available),before=clone(state);
- for(const type of ['tax','relief','buyGrain','sellGrain','demobilize']){
+ for(const type of ['tax','relief','buyGrain','sellGrain','demobilize','waterworks','sanitation']){
   const result=Live.act(state,{type,castleId:home.id,orderCastleId:other.id,officerId:officer.id,policy:'low',troops:200});
   assert.equal(result.ok,false,type);assert.equal(result.state,state);assert.equal(context.TenkaOrders.remaining(state,home.id),3);
  }
@@ -188,24 +188,24 @@ test('several player castles cannot spend the same shared treasury on unpaid con
  const {Game,Systems:Live}=runtime();let state=Game.newGame();
  const clans=[...new Set(state.castles.map(c=>c.clan))];state.npcPacts=[];
  for(let a=0;a<clans.length;a++)for(let b=a+1;b<clans.length;b++)if(clans[a]!==state.playerClan&&clans[b]!==state.playerClan)state.npcPacts.push([clans[a],clans[b]]);
- state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+4]));
+ state.alliances=clans.filter(c=>c!==state.playerClan);state.allianceExpires=Object.fromEntries(state.alliances.map(c=>[c,state.turn+12]));
  for(const [castleId,officerId] of [['kiyosu','oda_nobunaga'],['inuyama','shibata_katsuie']]){
   const started=Live.act(state,{type:'reclaim',castleId,officerId});assert.equal(started.ok,true);state=started.state;
  }
- state.gold=100;
+ state.gold=50;
  for(const id of ['kiyosu','inuyama'])Object.assign(state.tenka.estates[id],{devastation:100,unrest:70,taxPolicy:'low'});
  assert.equal(Game.validate(state),true);
  const result=Game.season(state),nextState=result.state,ledger=nextState.tenka.economy.ledger[0];
  const mandatory=ledger.militaryUpkeep+ledger.maintenance,available=state.gold+ledger.income-mandatory;
- assert.ok(available>=45&&available<90,'the shared treasury can afford exactly one project');
- assert.equal(ledger.projectUpkeep,45);assert.equal(ledger.goldDeficit,0);
+ assert.ok(available>=15&&available<30,'the shared treasury can afford exactly one monthly project bill');
+ assert.equal(ledger.projectUpkeep,15);assert.equal(ledger.goldDeficit,0);
  assert.equal(nextState.gold,available-ledger.projectUpkeep);
  const projects=['kiyosu','inuyama'].map(id=>nextState.tenka.estates[id].projects[0]);
- assert.deepEqual(projects.map(p=>p.remaining).sort(),[2,3]);
+ assert.deepEqual(projects.map(p=>p.remaining).sort(),[8,9]);
  assert.equal(projects.filter(p=>p.status==='資金不足で中断').length,1);
  assert.equal(Game.validate(nextState),true);
  // Allocation order is stable across a reload or a different castle array
- // order, so a save cannot gain another season of unpaid work.
+ // order, so a save cannot gain another month of unpaid work.
  const reloaded=clone(state);reloaded.castles.reverse();
  const again=Game.season(reloaded).state;
  for(const id of ['kiyosu','inuyama'])assert.equal(again.tenka.estates[id].projects[0].remaining,nextState.tenka.estates[id].projects[0].remaining);

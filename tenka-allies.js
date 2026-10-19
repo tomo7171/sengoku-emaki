@@ -6,9 +6,9 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
   const UNITS = ['ashigaru', 'archer', 'cavalry', 'firearm', 'navy'];
-  const SEASONS = ['春', '夏', '秋', '冬'];
   const DECLINE_LOSS = 15;
   const clone = value => JSON.parse(JSON.stringify(value));
+  const date = state => root.TenkaCalendar?.date?.(state) || (Number.isInteger(state.month) ? `${state.year}年 ${state.month}月` : `${state.year}年 ${['春', '夏', '秋', '冬'][state.season || 0]}`);
   const total = units => UNITS.reduce((sum, key) => sum + (units?.[key] || 0), 0);
   const castle = (state, id) => state.castles?.find(item => item.id === id);
   const clanName = (state, id) => state.castles?.find(item => item.clan === id)?.clanName || id;
@@ -65,13 +65,13 @@
       expiresTurn: state.turn, sourceClan: war.source.clan, targetClan: war.target.clan,
       requestedTroops: Math.max(100, Math.min(3000, Math.ceil(war.target.troops * .35 / 100) * 100)) };
     entry.pending.push(request);
-    append(state, '同盟国からの援軍要請', `${clanName(state, request.allyClan)}から${war.target.name}の${request.side === 'defender' ? '防衛' : '攻略'}への援軍要請。派兵元と人数を選んで応じるか、拒否してください。判断するまで戦況と季節は進みません。`);
+    append(state, '同盟国からの援軍要請', `${clanName(state, request.allyClan)}から${war.target.name}の${request.side === 'defender' ? '防衛' : '攻略'}への援軍要請。派兵元と人数を選んで応じるか、拒否してください。判断するまで戦況と月は進みません。`);
     return true;
   }
   function append(state, title, text) {
     state.nextLogId = Math.max(1, state.nextLogId || 1);
     state.logs = [{ id: `allies-${state.nextLogId++}`, type: 'diplomacy', title, text,
-      date: `${state.year}年 ${SEASONS[state.season]}` }, ...(state.logs || [])].slice(0, 80);
+      date: date(state) }, ...(state.logs || [])].slice(0, 80);
   }
   function currentWar(state, request) {
     const source = castle(state, request.sourceId), target = castle(state, request.targetId);
@@ -145,7 +145,7 @@
     const commanderId = state.armies?.[source.id]?.commanderId || null;
     const commander = state.officers?.find(item => item.id === commanderId);
     let reason = !route ? '同盟領への陸路・海路がありません。' : !maximum ? '守備兵を残して派兵できる兵がいません。'
-      : remainingOrders(state, source.id) < 1 ? 'この城の今季の行動力がありません。' : null;
+      : remainingOrders(state, source.id) < 1 ? 'この城の今月の行動力がありません。' : null;
     return { id: source.id, name: source.name, troops: source.troops, minimumGarrison: guard,
       maxTroops: reason ? 0 : maximum, availableTroops: maximum, units, commanderId,
       commanderName: commander?.name || '援軍奉行', maritime: !!route?.maritime,
@@ -248,7 +248,7 @@
       units: support?.units || emptyUnits(), casualtyUnits: support?.losses || emptyUnits(),
       foodCost: support?.foodCost || 0, goldCost: support?.goldCost || 0, orderCost: support ? 1 : 0,
       relationChange, won: allyWon, battleId: battle?.id || null, turn: state.turn,
-      date: `${state.year}年 ${SEASONS[state.season]}`,
+      date: date(state),
       message: support ? `${support.sourceName}から${support.troops}人を派兵。${name}側は${allyWon ? '勝利' : '敗北'}。援軍の戦死・損失${support.casualties}人、帰還${support.troops - support.casualties}人。友好+5。`
         : allied ? `${name}の援軍要請を拒否。友好-${DECLINE_LOSS}。同盟国は援軍なしで戦いました。`
           : `${name}の失効した援軍要請を終了。${warExists ? '戦闘は援軍なしで決着しました。' : '既に戦況が変化しています。'}友好度の変化はありません。` };
@@ -434,7 +434,7 @@
         troops: support.troops, casualties: item.casualties, survivors: item.survivors,
         units: clone(support.units), casualtyUnits: clone(item.casualtyUnits), foodCost: support.foodCost, goldCost: support.goldCost,
         orderCost: 0, relationChange: 0, won: !!report.won !== !!report.defending, battleId: report.id,
-        turn: state.turn, date: `${state.year}年 ${SEASONS[state.season]}`,
+        turn: state.turn, date: date(state),
         message: `${allyName}の援軍${support.troops}人：戦死・損失${item.casualties}人、${item.survivors}人が${home ? home.name + 'へ帰還' : '本国滅亡により解散'}。` };
       entry.reports = [result, ...entry.reports].slice(0, 40); append(state, '同盟軍の戦後報告', result.message);
     }

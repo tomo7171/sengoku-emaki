@@ -22,21 +22,111 @@
     }
     return s.year - o.birth;
   };
-  const point = s => s.year * 4 + (s.season || 0);
+  const monthly = s => Number.isInteger(s.month) && s.month >= 1 && s.month <= 12;
+  const period = s => monthly(s) ? 12 : 4;
+  const seasonMonth = season => [3, 6, 9, 12][season || 0];
+  const point = s => monthly(s) ? s.year * 12 + s.month - 1 : s.year * 4 + (s.season || 0);
   const alive = o => !!o && !['dead', 'unborn'].includes(o.status);
   const adult = (s, o) => alive(o) && age(s, o) != null && age(s, o) >= 15 && o.status === 'active';
   const owned = (s, clan) => (s.castles || []).filter(c => c.clan === clan);
   const officer = (s, id) => (s.officers || []).find(o => o.id === id);
   const female = o => (o?.gender || o?.sex) === 'female';
   const atHome = (s, o, clan) => alive(o) && o.clan === clan && !['captive', 'ronin'].includes(o.status);
-  const surnames = ['長宗我部', '龍造寺', '小早川', '小野寺', '上杉', '武田', '北条', '織田', '徳川', '松平', '今川', '島津', '毛利', '伊達', '最上', '佐竹', '里見', '相馬', '蘆名', '南部', '安東', '蠣崎', '浅井', '朝倉', '斎藤', '六角', '三好', '細川', '足利', '大内', '尼子', '大友', '伊東', '相良', '有馬', '大村', '蒲池', '波多野', '長野', '真田', '木曽', '村上', '宇都宮', '小田', '結城', '長尾', '宇喜多', '豊臣', '羽柴', '木下', '前田', '池田', '本多', '酒井', '井伊', '榊原', '石川', '黒田', '鍋島', '立花', '高橋'];
-  const surname = o => surnames.find(n => (o?.name || '').startsWith(n)) || (o?.name || '在地').slice(0, 2);
+  const surnames = ['長宗我部', '龍造寺', '小早川', '小野寺', '二階堂', '姉小路', '小笠原', '本願寺', '上杉', '武田', '北条', '織田', '徳川', '松平', '今川', '島津', '毛利', '伊達', '最上', '佐竹', '里見', '相馬', '蘆名', '南部', '安東', '蠣崎', '浅井', '朝倉', '斎藤', '六角', '三好', '細川', '足利', '大内', '尼子', '大友', '伊東', '相良', '有馬', '大村', '蒲池', '波多野', '長野', '真田', '木曽', '村上', '宇都宮', '小田', '結城', '長尾', '宇喜多', '豊臣', '羽柴', '木下', '前田', '池田', '本多', '酒井', '井伊', '榊原', '石川', '黒田', '鍋島', '立花', '高橋', '宗'];
+  const surname = o => surnames.find(n => (o?.name || '').startsWith(n)) || LOCAL_SURNAMES.find(n => (o?.name || '').startsWith(n)) || (o?.name || '在地').slice(0, 2);
+  const LOCAL_SURNAMES = ['庄田', '岩村', '中島', '稲葉', '村井', '山岡', '三田', '大沢', '河村', '小坂', '松井', '奥村', '青山', '石田', '大橋', '岡部', '小野', '梶原', '片岡', '金森', '川合', '木村', '久世', '後藤', '佐久間', '佐々', '篠原', '清水', '杉原', '高木', '滝川', '田原', '土屋', '戸田', '永井', '中川', '成瀬', '丹羽', '野々村', '長谷川', '服部', '原田', '平井', '堀田', '松倉', '水野', '村瀬', '森田', '安田', '山内', '山崎', '横山'];
+  const GIVEN_FIRST = [...'宗景義清盛信晴忠正兼重政直成光秀頼高実繁利康春為定長直元親勝吉久豊時貞尚房俊朝賢綱昌良祐胤氏泰友安家通資'];
+  const GIVEN_LAST = [...'直久綱成忠重俊長継信景義清盛晴正兼政光秀頼高実繁利康為定元親勝吉豊時貞尚房朝賢昌良祐胤氏泰友安通資茂則敏包'];
+  const MALE_GIVENS = ['宗直', '景久', '義綱', '清成', '盛忠', '信重', '晴綱', '忠俊', '景長', '正継', '兼定', '重政', '頼成', '高信', '実継', '繁久', '利光', '康直', '元秀', '親盛'];
+  const FEMALE_GIVENS = ['春姫', '菊姫', '月姫', '雪姫', '千代姫', '初姫', '藤姫', '竹姫', '松姫', '梅姫', '菖蒲姫', '桜姫', '楓姫', '梓姫', '鶴姫', '亀姫', '琴姫', '鈴姫', '静姫', '綾姫', '光姫', '華姫', '瑞姫', '芳姫', '幸姫', '巴姫', '奈津姫', '小春姫', '初音姫', '千鶴姫', '千草姫', '若葉姫'];
+  const GIRL_FIRST = [...'春菊月雪藤竹松梅桜楓梓鶴琴鈴静綾光華瑞芳幸巴咲絹千美和志麻清久夏秋冬花朝夕恵香里'];
+  const GIRL_LAST = ['乃', '代', '香', '音', '子', '枝', '華', '緒', '恵', '里', '江', '葉', '衣', '美'];
+  const hasNumber = value => /[0-9０-９]/.test(String(value || ''));
+  // Names are selected from actual surname and given-name elements. IDs may
+  // contain serials; a collision in the visible name never adds a serial.
+  function uniqueName(key, usedNames, options = {}) {
+    if (options.preferred && !hasNumber(options.preferred) && !usedNames.has(options.preferred)) return options.preferred;
+    const families = options.familyName && !hasNumber(options.familyName) ? [options.familyName] : LOCAL_SURNAMES;
+    const curated = options.gender === 'female' ? FEMALE_GIVENS : MALE_GIVENS;
+    const first = options.gender === 'female' ? GIRL_FIRST : GIVEN_FIRST;
+    const last = options.gender === 'female' ? GIRL_LAST : GIVEN_LAST;
+    const suffix = options.gender === 'female' ? '姫' : '';
+    const seed = hash(`name:${key}`);
+    // The first pass uses familiar names; the larger second pass also keeps
+    // long campaigns and a densely populated household free of numbered names.
+    for (const pool of [curated, null]) {
+      const count = pool ? pool.length : first.length * last.length;
+      const total = families.length * count;
+      for (let offset = 0; offset < total; offset++) {
+        const index = (seed + offset) % total, givenIndex = index % count;
+        if (!pool && first[Math.floor(givenIndex / last.length)] === last[givenIndex % last.length]) continue;
+        const given = pool ? pool[givenIndex] : first[Math.floor(givenIndex / last.length)] + last[givenIndex % last.length] + suffix;
+        const name = families[Math.floor(index / count)] + given;
+        if (!usedNames.has(name)) return name;
+      }
+    }
+    // Rare overflow uses traditional names such as 宗之助・景右衛門 rather
+    // than turning a number into a label. This pool is only needed after every
+    // ordinary two-character name for the relevant surname is already used.
+    const endings = options.gender === 'female' ? ['乃', '代', '香', '枝', '緒'] : ['之助', '之丞', '右衛門', '左衛門', '兵衛'];
+    for (let width = 1; ; width++) {
+      const count = first.length ** width * endings.length;
+      for (let offset = 0; offset < count * families.length; offset++) {
+        let code = (seed + offset) % (count * families.length);
+        const family = families[Math.floor(code / count)], ending = endings[code % endings.length];
+        code = Math.floor(code / endings.length);
+        let given = '';
+        for (let letter = 0; letter < width; letter++) { given += first[code % first.length]; code = Math.floor(code / first.length); }
+        const name = family + given + ending + suffix;
+        if (!usedNames.has(name)) return name;
+      }
+    }
+  }
+  function normalizeNames(s) {
+    const changed = new Map(), used = new Set(s.officers.filter(o => !hasNumber(o.name)).map(o => o.name));
+    const rename = (o, name) => { changed.set(o.id, { old: o.name, name }); o.name = name; used.add(name); };
+    const numeric = s.officers.filter(o => hasNumber(o.name)).sort((a, b) => a.id.localeCompare(b.id));
+    for (const o of numeric) {
+      const canonical = canonicalOfficers[o.id]?.name || HISTORICAL.find(spec => spec.id === o.id || (ALIASES[spec.id] || []).includes(o.id))?.name;
+      if (canonical && !hasNumber(canonical)) rename(o, canonical);
+    }
+    const pending = new Map(numeric.filter(o => hasNumber(o.name)).map(o => [o.id, o]));
+    const repair = o => {
+      pending.delete(o.id);
+      const father = officer(s, o.fatherId);
+      if (father && pending.has(father.id)) repair(father);
+      const base = String(o.name).replace(/[（(][0-9０-９]+(?:[-－][0-9０-９]+)*[）)]\s*$/, '').replace(/[0-9０-９]+\s*$/, '').trim();
+      const recognized = [...surnames, ...LOCAL_SURNAMES].find(value => base.startsWith(value) && base.length > value.length);
+      const preferred = recognized && /^[\p{Script=Han}]+$/u.test(base) ? base : null;
+      rename(o, uniqueName(o.id, used, { preferred, gender: female(o) ? 'female' : 'male', familyName: father ? surname(father) : null }));
+    };
+    for (const o of numeric) if (pending.has(o.id)) repair(o);
+    if (!changed.size) return;
+    // Human-readable report caches follow the existing ID. No affiliation,
+    // ability, parent/spouse ID, tactical ledger or save identity is replaced.
+    const refresh = value => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) { value.forEach(refresh); return; }
+      const person = changed.get(value.officerId || value.id);
+      if (person && value.name === person.old) value.name = person.name;
+      const commander = changed.get(value.commanderId);
+      if (commander && value.commanderName === commander.old) value.commanderName = commander.name;
+      for (const [key, nested] of Object.entries(value)) if (!['ledger', 'replay', 'tacticalRecord'].includes(key) && nested && typeof nested === 'object') refresh(nested);
+    };
+    refresh(s.tenka); refresh(s.lastBattle); refresh(s.aiBattles);
+    const replacements = new Map();
+    for (const { old, name } of changed.values()) replacements.set(old, replacements.has(old) ? null : name);
+    const ordered = [...replacements].filter(([, name]) => name).sort((a, b) => b[0].length - a[0].length);
+    for (const entry of s.logs || []) for (const key of ['title', 'text']) if (typeof entry[key] === 'string') {
+      for (const [old, name] of ordered) entry[key] = entry[key].split(old).join(name);
+    }
+  }
   const CLAN_NAMES = { oda: '織田家', matsudaira: '松平家', takeda: '武田家', uesugi: '上杉家', hojo: '北条家', date: '伊達家', shimazu: '島津家', mori: '毛利家', otomo: '大友家', imagawa: '今川家', ryuzoji: '龍造寺家', chokosabe: '長宗我部家', chosokabe: '長宗我部家' };
   const clanInfo = (s, id) => s.clans?.[id] || configuredClans[id] || root.TenkaGame?.clans?.[id] || {};
   const clanName = (s, id) => clanInfo(s, id).name || CLAN_NAMES[id] || owned(s, id)[0]?.clanName || `${id}家`;
   const log = (s, title, text) => {
     s.nextLogId = Math.max(1, Number(s.nextLogId) || 1);
-    s.logs = [{ id: `dynasty-${s.nextLogId++}`, type: 'dynasty', title, text, date: `${s.year}年 ${['春', '夏', '秋', '冬'][s.season || 0]}` }, ...(s.logs || [])].slice(0, 80);
+    s.logs = [{ id: `dynasty-${s.nextLogId++}`, type: 'dynasty', title, text, date: monthly(s) ? `${s.year}年 ${s.month}月` : `${s.year}年 ${['春', '夏', '秋', '冬'][s.season || 0]}` }, ...(s.logs || [])].slice(0, 80);
   };
   // Dates are birth years, not forced dates for death, marriage or succession.
   // An unborn historical child appears only if the recorded father remains alive in this house.
@@ -175,6 +265,7 @@
     if (o.historicalDeath == null && o.origin !== 'fictional' && Number.isInteger(canonical?.death ?? (!o.deathYear ? o.death : null))) o.historicalDeath = canonical?.death ?? o.death;
     if (!Number.isInteger(o.naturalDeathAge) || o.naturalDeathAge < 45 || o.naturalDeathAge > 100) o.naturalDeathAge = naturalLifespan(o);
     if (!Number.isInteger(o.naturalDeathSeason) || o.naturalDeathSeason < 0 || o.naturalDeathSeason > 3) o.naturalDeathSeason = hash(`death-season:${o.id}`) % 4;
+    if (monthly(s) && (!Number.isInteger(o.naturalDeathMonth) || o.naturalDeathMonth < 1 || o.naturalDeathMonth > 12)) o.naturalDeathMonth = seasonMonth(o.naturalDeathSeason);
     if (o.status === 'dead') {
       if (!Number.isInteger(o.deathYear) || o.deathYear < o.birth || o.deathYear > s.year || o.deathYear - o.birth > 100) {
         // Older saves did not distinguish a historical reference date from actual death.
@@ -195,6 +286,7 @@
     const year = Number.isInteger(details.year) ? details.year : s.year;
     o.deathYear = year; o.death = year;
     o.deathSeason = Number.isInteger(details.season) ? details.season : s.season || 0;
+    if (monthly(s)) o.deathMonth = Number.isInteger(details.month) ? details.month : s.month;
     o.diedAtAge = Number.isFinite(details.age) ? details.age : Math.max(0, year - o.birth);
     o.deathCause = details.cause || 'unknown';
     if (details.estimated) o.deathDateEstimated = true;
@@ -202,7 +294,7 @@
     Object.assign(o, { status: 'dead', castleId: null, capturedBy: null });
     for (const army of Object.values(s.armies || {})) if (army.commanderId === o.id) army.commanderId = null;
     if (s.tenka?.assignments) delete s.tenka.assignments[o.id];
-    const entry = { officerId: o.id, name: o.name, clan: o.clan, year, season: o.deathSeason, age: o.diedAtAge, cause: o.deathCause, estimated: !!details.estimated };
+    const entry = { officerId: o.id, name: o.name, clan: o.clan, year, season: o.deathSeason, ...(monthly(s) ? { month: o.deathMonth } : {}), age: o.diedAtAge, cause: o.deathCause, estimated: !!details.estimated };
     if (s.tenka?.dynasty) {
       const deaths = s.tenka.dynasty.deaths ||= [];
       if (!deaths.some(d => d.officerId === o.id)) deaths.push(entry);
@@ -213,9 +305,10 @@
     for (const o of s.officers) {
       if (!alive(o)) continue;
       const years = s.year - o.birth;
-      const due = point(s) >= (o.birth + o.naturalDeathAge) * 4 + o.naturalDeathSeason;
+      const deathPoint = monthly(s) ? (o.birth + o.naturalDeathAge) * 12 + o.naturalDeathMonth - 1 : (o.birth + o.naturalDeathAge) * 4 + o.naturalDeathSeason;
+      const due = point(s) >= deathPoint;
       if (!due || (migrationOnly && years < 100)) continue;
-      recordDeath(s, o, { cause: 'natural', year: o.birth + o.naturalDeathAge, season: o.naturalDeathSeason, estimated: migrationOnly });
+      recordDeath(s, o, { cause: 'natural', year: o.birth + o.naturalDeathAge, season: o.naturalDeathSeason, ...(monthly(s) ? { month: o.naturalDeathMonth } : {}), estimated: migrationOnly });
       if (o.clan === s.playerClan) log(s, '家臣の死去', `${o.name}が${o.deathYear}年に病・老衰で亡くなりました（享年${o.diedAtAge}歳）。${migrationOnly ? '旧セーブの寿命未設定を補正しました。' : '世継ぎ・後見人が家督と領国を支えます。'}`);
     }
   }
@@ -263,6 +356,7 @@
     for (const key of ['events', 'marriages', 'deaths']) if (!Array.isArray(d[key])) d[key] = [];
     d.version = 2;
     for (const o of s.officers) { normalizeDates(s, o); touchOfficer(s, o); }
+    normalizeNames(s);
     for (const [childId, fatherId] of Object.entries(EXISTING_FATHERS)) {
       const child = officer(s, childId);
       const father = officer(s, fatherId) || s.officers.find(o => (ALIASES[fatherId] || []).includes(o.id));
@@ -369,7 +463,8 @@
       const key = head.id;
       if (!f.birthSchedules[key]) f.birthSchedules[key] = { nextYear: s.year + 1 + hash(key) % 3, born: 0 };
       const schedule = f.birthSchedules[key];
-      if (s.season !== 0 || s.year < schedule.nextYear || schedule.born >= 4) continue;
+      const spring = monthly(s) ? s.month >= 3 && s.month <= 5 : s.season === 0;
+      if (!spring || s.year < schedule.nextYear || schedule.born >= 4 || schedule.lastBirthYear === s.year || schedule.lastBirthTurn === s.turn) continue;
       const gender = (schedule.born + hash(key)) % 2 ? 'female' : 'male';
       // Parent IDs already contain ancestry for older saves; never nest them into a child's ID.
       const baseId = `dyn-child-${clan.slice(0, 24)}-${hash(head.id).toString(36)}-${s.year}-${schedule.born + 1}`;
@@ -379,13 +474,13 @@
       }
       if (!existing) {
         const given = gender === 'female' ? ['春', '菊', '月', '雪'][schedule.born % 4] + '姫' : ['義成', '景成', '信継', '晴継'][hash(id) % 4];
-        const name = `${surname(head)}${given}` + (s.officers.some(o => o.name === `${surname(head)}${given}`) ? `（${schedule.born + 1}）` : '');
+        const name = uniqueName(id, new Set(s.officers.map(o => o.name)), { familyName: surname(head), gender, preferred: `${surname(head)}${given}` });
         const o = createOfficer(s, { id, name, clan, castleId: owned(s, clan)[0].id, birth: s.year, gender, fatherId: head.id, isKin: true,
           biography: `${head.name}の${gender === 'female' ? '娘' : '息子'}としてゲーム内で生まれた架空人物。史実の系譜とは区別する。` });
         s.officers.push(o); s.tenka.loyalty[id] = 95; f.kinIds.push(id);
         if (clan === s.playerClan) log(s, gender === 'female' ? '姫の誕生' : '一門に男子誕生', `${head.name}の家に${name}が誕生しました（架空の子）。${gender === 'female' ? '姫として育ち、十八歳以降は政略結婚を結べます。' : '一門衆に加わり、十五歳で元服します。'}`);
       }
-      schedule.born++; schedule.nextYear = s.year + 4;
+      schedule.born++; schedule.nextYear = s.year + 4; schedule.lastBirthYear = s.year; schedule.lastBirthTurn = s.turn;
     }
   }
   function renewMarriages(s) {
@@ -400,7 +495,7 @@
       if ([m.fromClan, m.toClan].includes(s.playerClan)) {
         const other = m.fromClan === s.playerClan ? m.toClan : m.fromClan;
         if (!s.alliances.includes(other)) s.alliances.push(other);
-        s.allianceExpires[other] = s.turn + 4; s.relations[other] = Math.max(75, s.relations[other] || 0);
+        s.allianceExpires[other] = s.turn + period(s); s.relations[other] = Math.max(75, s.relations[other] || 0);
       } else if (!s.npcPacts.some(pair => pair.includes(m.fromClan) && pair.includes(m.toClan))) s.npcPacts.push([m.fromClan, m.toClan]);
     }
   }
@@ -412,10 +507,10 @@
     proceduralBirths(s); updateFamilies(s); renewMarriages(s); d.initialized = true; return s;
   }
   function candidate(s, clan = s.playerClan, sequence = 0, usedNames = new Set()) {
-    const id = `dyn-recruit-${clan}-${s.turn}-${sequence}`, seed = hash(id), names = ['庄田', '岩村', '中島', '稲葉', '村井', '山岡', '三田', '大沢', '河村', '小坂'];
-    const givens = ['宗直', '景久', '義綱', '清成', '盛忠', '信重', '晴綱', '忠俊', '景長', '正継'];
-    let name = names[seed % names.length] + givens[(seed >>> 8) % givens.length];
-    if (usedNames.has(name)) name += `（${s.turn}-${sequence + 1}）`;
+    const id = `dyn-recruit-${clan}-${s.turn}-${sequence}`, seed = hash(id);
+    const existing = officer(s, id);
+    const preferred = LOCAL_SURNAMES[seed % 10] + MALE_GIVENS[(seed >>> 8) % 10];
+    const name = existing?.name || uniqueName(id, usedNames, { preferred });
     usedNames.add(name);
     const emergency = !s.officers.some(o => o.clan === clan && adult(s, o));
     const home = owned(s, clan)[seed % Math.max(1, owned(s, clan).length)];
@@ -425,7 +520,7 @@
   }
   function recruits(s) {
     const prefix = `dyn-recruit-${s.playerClan}-${s.turn}-`;
-    // Build the entire seasonal pool before filtering hires so its names and abilities
+    // Build the entire current-turn pool before filtering hires so names and abilities
     // stay stable when another candidate is hired or the save is loaded again.
     const usedNames = new Set(s.officers.filter(o => !o.id.startsWith(prefix)).map(o => o.name));
     const pool = Array.from({ length: 8 }, (_, sequence) => candidate(s, s.playerClan, sequence, usedNames));
@@ -458,9 +553,9 @@
       const choices = recruits(s), selected = action.candidateId ? choices.find(o => o.id === action.candidateId) : choices[0];
       if (!selected) return fail('登用候補が変わりました。現在の候補を選んでください。');
       const record = d.recruitment[clan];
-      if (record?.turn === s.turn && record.count >= 2 && !selected.emergency) return fail('今季の新規登用は二人までです。次の季節に新たな人材が現れます。');
+      if (record?.turn === s.turn && record.count >= 2 && !selected.emergency) return fail(monthly(s) ? '今月の新規登用は二人までです。翌月に新たな人材が現れます。' : '今季の新規登用は二人までです。次の季節に新たな人材が現れます。');
       if ((s.gold || 0) < selected.cost) return fail(`登用には金${selected.cost}貫が必要です。`);
-      if ((s.actionPoints || 0) < selected.commandCost) return fail('登用には命令1が必要です。季節を進めると回復します。');
+      if ((s.actionPoints || 0) < selected.commandCost) return fail(monthly(s) ? '登用には命令1が必要です。翌月になると回復します。' : '登用には命令1が必要です。季節を進めると回復します。');
       let person = officer(s, selected.id);
       if (person && person.status !== 'ronin') return fail('その人物は現在登用できません。');
       if (person) Object.assign(person, { clan, castleId: destination.id, status: 'active', capturedBy: null, isKin: false });

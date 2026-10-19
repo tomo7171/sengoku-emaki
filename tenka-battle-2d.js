@@ -199,6 +199,11 @@
       const color = item.supportColor || (item.side === "attacker" ? battle.sourceCastle?.color || "#c44835" : battle.targetCastle?.color || "#38639a");
       const radius = clamp(camera.scale * 2.0, 5, 17), angle = Math.atan2(item.facingZ || -1, item.facingX || 0) + Math.PI / 2;
       if (chosen && rangeVisible) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(5, item.range || 2.5) * camera.scale, 0, Math.PI * 2); ctx.fillStyle = "rgba(234,211,123,.08)"; ctx.fill(); ctx.strokeStyle = "rgba(255,230,150,.48)"; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); }
+      if(chosen&&rangeVisible&&battle.controlMode==='turns'&&battle.phase==='fighting'){
+        const movement=root.TenkaTactics?.turnView(battle,item.id)?.selected?.movement;
+        if(movement){ctx.beginPath();ctx.arc(p.x,p.y,movement*camera.scale,0,Math.PI*2);ctx.strokeStyle='rgba(133,217,242,.85)';ctx.setLineDash([8,4]);ctx.stroke();ctx.setLineDash([]);}
+        if(item.turnPlan?.move){const end=transform.toScreen(item.turnPlan.move.x,item.turnPlan.move.z);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(end.x,end.y);ctx.strokeStyle='#a0ddeb';ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);}
+      }
       if (chosen && item.order !== "hold" && Math.hypot(item.targetX - item.x, item.targetZ - item.z) > 1) { const dest = transform.toScreen(item.targetX, item.targetZ); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(dest.x, dest.y); ctx.strokeStyle = "#f7dda1"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(dest.x, dest.y, 4, 0, Math.PI * 2); ctx.stroke(); }
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(angle);
       ctx.fillStyle = "rgba(18,24,19,.35)"; ctx.beginPath(); ctx.ellipse(2, 3, radius, radius * .6, 0, 0, Math.PI * 2); ctx.fill();

@@ -34,7 +34,7 @@ test('the recruitment comparison shows the complete pool with independent hire a
  assert.deepEqual(remaining,Array.from(expected.filter(o=>o.id!==picked.id),o=>o.id));
 });
 
-test('recruitment buttons explain the seasonal limit while leaving remaining candidates visible',()=>{
+test('recruitment buttons explain the monthly limit while leaving remaining candidates visible',()=>{
  const props={state:Game.newGame()},screen=renderer(props);
  control(screen.render(),'button','家臣').props.onClick();
  for(let i=0;i<2;i++){
@@ -42,8 +42,8 @@ test('recruitment buttons explain the seasonal limit while leaving remaining can
   control(first,'button',Dynasty.getView(props.state).recruits[0].name+'を登用').props.onClick();
  }
  const tree=screen.render(),rows=candidates(tree);assert.ok(rows.length>=6);
- for(const row of rows){const button=flatten(row).find(n=>n.type==='button');assert.equal(button.props.disabled,true);assert.equal(content(button),'今季の登用は終了');}
- assert.match(content(tree),/今季あと 0 人/);
+ for(const row of rows){const button=flatten(row).find(n=>n.type==='button');assert.equal(button.props.disabled,true);assert.equal(content(button),'今月の登用は終了');}
+ assert.match(content(tree),/今月あと 0 人/);
 });
 
 test('a selected castle controls recruitment and diplomacy budgets even if another castle is exhausted',()=>{
@@ -57,7 +57,7 @@ test('a selected castle controls recruitment and diplomacy budgets even if anoth
   control(screen.render(),'button','家臣').props.onClick();
   let tree=screen.render();assert.equal(flatten(candidates(tree)[0]).find(n=>n.type==='button').props.disabled,true);
   control(tree,'select','命令を出す城').props.onChange({target:{value:'ui-second-castle'}});
-  tree=screen.render();assert.match(content(tree),/第二城の今季の命令/);assert.equal(flatten(candidates(tree)[0]).find(n=>n.type==='button').props.disabled,false);
+  tree=screen.render();assert.match(content(tree),/第二城の今月の命令/);assert.equal(flatten(candidates(tree)[0]).find(n=>n.type==='button').props.disabled,false);
   control(tree,'button','外交').props.onClick();tree=screen.render();assert.ok(control(tree,'select','命令を出す城'));
   const action=flatten(tree).find(n=>n.type==='button'&&n.props.className==='tenka-action');assert.equal(action.props.disabled,false);
  }finally{context.TenkaOrders=original;}

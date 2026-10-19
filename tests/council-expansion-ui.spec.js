@@ -23,8 +23,8 @@ function renderer(env,name,props){
  return {render(){cursor=0;return Component(props);}};
 }
 function campaign(env,year=1560){
- let state=env.Game.newGame();state.year=year;state.turn=(year-1560)*4+1;state.season=0;state.gold=100000;state.food=1000000;state.prestige=90;state=env.Game.migrate(state);
- state.alliances=['matsudaira'];state.allianceExpires={matsudaira:state.turn+4};state.relations.matsudaira=85;
+ let state=env.Game.newGame();state.year=year;state.month=3;state.turn=(year-1560)*12+1;state.season=0;state.gold=100000;state.food=1000000;state.prestige=90;state=env.Game.migrate(state);
+ state.alliances=['matsudaira'];state.allianceExpires={matsudaira:state.turn+12};state.relations.matsudaira=85;
  return env.Diplomacy.initialize(state);
 }
 
@@ -75,24 +75,24 @@ test('submission UI shows preflight reasons for insufficient power and charges a
  assert.deepEqual(clone(props.state.castles),before.castles,'submission never secretly annexes or replenishes an estate');
 });
 
-test('estate planning shows forecast and real multi-season projects with correct labor and order use',()=>{
+test('estate planning shows forecast and real multi-month projects with correct labor and order use',()=>{
  const env=setup(),props={state:campaign(env),castleId:'kiyosu',officerId:'oda_nobunaga'},screen=renderer(env,'EstateManagement',props),before=clone(props.state);
- let tree=screen.render();assert.match(content(tree),/季節の収支/);assert.match(content(tree),/全領国の蓄え/);assert.match(content(tree),/完成まで 3 季/);assert.match(content(tree),/農作業の効率/);
+ let tree=screen.render();assert.match(content(tree),/今月の収支/);assert.match(content(tree),/全領国の蓄え/);assert.match(content(tree),/完成まで 9 か月/);assert.match(content(tree),/農作業の効率/);
  assert.equal(control(tree,'button','田畑の開墾に着手').props.disabled,false);control(tree,'button','田畑の開墾に着手').props.onClick();tree=screen.render();
- const project=props.state.tenka.estates.kiyosu.projects.find(p=>p.type==='reclaim');assert.ok(project);assert.equal(project.remaining,3);assert.equal(env.Orders.remaining(props.state,'kiyosu'),2);assert.equal(env.Orders.remaining(props.state,'inuyama'),3);
- assert.equal(props.state.gold,before.gold-300);assert.match(content(tree),/完成まであと 3 \/ 3 季/);assert.ok(content(tree).includes('工事に従事 '+project.workforce.toLocaleString('ja-JP')+' 人'));
+ const project=props.state.tenka.estates.kiyosu.projects.find(p=>p.type==='reclaim');assert.ok(project);assert.equal(project.remaining,9);assert.equal(env.Orders.remaining(props.state,'kiyosu'),2);assert.equal(env.Orders.remaining(props.state,'inuyama'),3);
+ assert.equal(props.state.gold,before.gold-300);assert.match(content(tree),/完成まであと 9 \/ 9 か月/);assert.ok(content(tree).includes('工事に従事 '+project.workforce.toLocaleString('ja-JP')+' 人'));
  assert.equal(control(tree,'button','田畑の開墾に着手').props.disabled,true);assert.match(content(tree),/同じ種類の工事が進行中/);
 });
 
-test('tax policy is a deliberate selected change with a one-season guard',()=>{
+test('tax policy is a deliberate selected change with a one-month guard',()=>{
  const env=setup(),props={state:campaign(env),castleId:'kiyosu',officerId:'oda_nobunaga'},screen=renderer(env,'EstateManagement',props);
  let tree=screen.render();assert.equal(control(tree,'button','税の方針を改める').props.disabled,true);
  control(tree,'select','年貢と税の方針').props.onChange({target:{value:'low'}});tree=screen.render();assert.equal(control(tree,'button','税の方針を改める').props.disabled,false);
  control(tree,'button','税の方針を改める').props.onClick();tree=screen.render();assert.equal(props.state.tenka.estates.kiyosu.taxPolicy,'low');assert.equal(env.Orders.remaining(props.state,'kiyosu'),2);
- assert.equal(control(tree,'select','年貢と税の方針').props.disabled,true);assert.match(content(tree),/今季変更済み/);
+ assert.equal(control(tree,'select','年貢と税の方針').props.disabled,true);assert.match(content(tree),/今月変更済み/);
 });
 
-test('grain sale protects the actual two-season reserve and demobilization requires an explicit valid integer',()=>{
+test('grain sale protects the actual two-month reserve and demobilization requires an explicit valid integer',()=>{
  const env=setup(),state=campaign(env),forecast=env.Systems.getView(state).economy;state.food=1200+forecast.totals.foodUpkeep*2-1;
  const props={state,castleId:'kiyosu',officerId:'oda_nobunaga'},screen=renderer(env,'EstateManagement',props);let tree=screen.render();
  assert.equal(control(tree,'button','兵糧を売却する').props.disabled,true);assert.match(content(tree),/兵糧が足りないため売却できません/);
@@ -103,7 +103,7 @@ test('grain sale protects the actual two-season reserve and demobilization requi
 
 test('estate commands disable when the selected castle has no orders or an aid decision blocks progress',()=>{
  const env=setup(),state=campaign(env),props={state,castleId:'kiyosu',officerId:'oda_nobunaga'},screen=renderer(env,'EstateManagement',props);state.tenka.castleOrders.castles.kiyosu.remaining=0;
- let tree=screen.render();assert.equal(control(tree,'button','田畑の開墾に着手').props.disabled,true);assert.match(content(tree),/この城の今季の命令がありません/);
+ let tree=screen.render();assert.equal(control(tree,'button','田畑の開墾に着手').props.disabled,true);assert.match(content(tree),/この城の今月の命令がありません/);
  state.tenka.castleOrders.castles.kiyosu.remaining=3;state.pendingDefense={sourceId:'inabayama',targetId:'kiyosu',mode:'siege'};tree=screen.render();assert.equal(control(tree,'button','兵糧を買い入れる').props.disabled,true);assert.match(content(tree),/先に合戦・援軍への対応/);
 });
 
