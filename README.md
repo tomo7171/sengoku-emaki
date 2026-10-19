@@ -41,7 +41,11 @@
 
 合戦の開始前に、出陣元・守備城にいる配下の武将を各兵科へ一人ずつ割り当て、全隊の位置をプレイヤーが確定します。同じ武将を複数の自軍部隊へ重ねて任命できず、組頭だけの部隊では開戦できません。武将が足りない場合は登用・城への配属、軍備の編制を見直すか、兵科ごとの「予備へ戻す」で出陣部隊を絞ります。予備は布陣一覧に残り、「出陣へ戻す」で復帰できます。侵攻中の城でもこの調整を使えます。野戦・攻城戦・籠城戦とも、仮配置を確認せずに開戦することはできません。
 
-開戦後は部隊ごとの移動と攻撃・防御・待機を計画し、「このターンを実行」で両軍が行動します。検討中に自動で兵が進んだり、兵糧を消費したりしません。兵科別に移動量・射程・攻撃・防御を設定し、地形・陣形・疲労が移動に影響します。敵も同じ移動・攻撃回数の制限で判断します。選択部隊には2D戦況図で水色の移動範囲と黄色の射程を表示します。ターンごとに命令を選び直すため、部隊が前の攻撃命令で勝手に進撃し続けることはありません。
+開戦後は「手動ターン」と「自動命令」を選べます。手動では部隊ごとの移動・攻撃・防御・待機を計画し、「このターンを実行」で両軍が行動します。命令を検討している間は戦闘と兵糧消費が止まります。兵科別に移動量・射程・攻撃・防御を設定し、地形・陣形・疲労が移動に影響します。敵も同じ移動・攻撃回数の制限で判断します。選択部隊には2D戦況図で水色の移動範囲と黄色の射程を表示します。
+
+野戦・攻城戦・籠城戦とも、布陣中に各部隊の攻撃目標や移動先を設定し、「開戦後に自動進行」にチェックして開戦できます。開戦後に「自動命令」から進行を始めることもできます。攻撃命令の部隊は目標へ接近して交戦し、移動命令は目的地へ向かいます。「この部隊を待機」「この部隊を防御」で一部隊だけその場に残せ、未指定の部隊も待機します。他の味方と敵は進行を続け、待機中の部隊も被攻撃の対象となります。目標撃破・移動完了後は待機へ切り替わります。攻城側は「本丸制圧」で城門突破から本丸攻略までを継続できます。
+
+自動進行中も、部隊や目標を選び直して命令を変更できます。戦場上の移動・攻撃・防御の指示も継続命令に反映します。「自動進行を一時停止」で両軍と兵糧消費を止め、再開時は設定した命令を引き継ぎます。速度は1・2・4倍で変更でき、移動力・攻撃回数は変わりません。戦場を閉じる操作では自動進行を停止し、取り消して戻っても勝手には再開しません。自動進行は各ターンの命令・兵糧・障害物・戦後処理と同じ規則を使います。
 
 
 出陣の軍議と籠城の軍議で、合戦に用意する兵糧の数量を指定できます。15・30・60分を目安にするボタンと直接入力を用意し、予想消費と領国に残す備蓄を表示します。攻撃軍の準備費600石は持込分と別に必要です。合流する同盟軍も消費人数に含め、戦場で兵が減れば消費も減ります。合戦中に領国の在庫から補充はせず、枯渇すると士気低下に加え、攻撃力と疲労に影響します。実際に使った兵糧だけを戦後に精算し、未使用分は備蓄へ戻します。
@@ -138,7 +142,7 @@ node --test tests/*.spec.js
 
 Settings → Pages → Build and deploymentで、Sourceを「GitHub Actions」に設定します。mainへの更新で公開用ワークフローが実行されます。
 
-配信対象は `index.html`、`tenka-calendar.js`、`tenka-turn-ui.js`、`tenka-turn-ui.css`、`tenka-portraits.js`、`tenka-castles.js`、`tenka-fortress-materials.js`、`tenka-castle-models.js`、`tenka-castle-precincts.js`、`tenka-battlefield.js`、`tenka-battle-environment.js`、`tenka-battle-2d.js`、`tenka-battle-scenes.js`、`tenka-systems.js`、`tenka-dynasty.js`、`tenka-tactics.js`、`tenka-orders.js`、`tenka-retainers.js`、`tenka-allies.js`、`tenka-diplomacy.js`、`tenka-transfers.js`、`tenka-routes.js`、`tenka-supplies.js`、`tenka-ui.js`、`tenka-ui.css`、`tenka-routes.css`、`tenka-supplies.css`、`tenka-battle-session.css`、画像と `.nojekyll` です。ゲームを別の場所へコピーする場合もJS・CSSを同じディレクトリに置いてください。
+配信対象は `index.html`、`tenka-calendar.js`、`tenka-auto-battle.js`、`tenka-turn-ui.js`、`tenka-turn-ui.css`、`tenka-portraits.js`、`tenka-castles.js`、`tenka-fortress-materials.js`、`tenka-castle-models.js`、`tenka-castle-precincts.js`、`tenka-battlefield.js`、`tenka-battle-environment.js`、`tenka-battle-2d.js`、`tenka-battle-scenes.js`、`tenka-systems.js`、`tenka-dynasty.js`、`tenka-tactics.js`、`tenka-orders.js`、`tenka-retainers.js`、`tenka-allies.js`、`tenka-diplomacy.js`、`tenka-transfers.js`、`tenka-routes.js`、`tenka-supplies.js`、`tenka-ui.js`、`tenka-ui.css`、`tenka-routes.css`、`tenka-supplies.css`、`tenka-battle-session.css`、画像と `.nojekyll` です。ゲームを別の場所へコピーする場合もJS・CSSを同じディレクトリに置いてください。
 
 日本列島の海岸線はNatural Earthのパブリックドメイン地理データを簡略化して使用しています。https://www.naturalearthdata.com/about/terms-of-use/
 

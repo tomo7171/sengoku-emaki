@@ -13,7 +13,7 @@ function runtime(options={}){
  const values=new Map();
  const localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key),clear:()=>values.clear()};
  const context=vm.createContext({console,setTimeout,clearTimeout,performance,URL,localStorage});context.window=context;
- for(const name of ['tenka-calendar.js','tenka-turn-ui.js','tenka-portraits.js','tenka-castles.js','tenka-fortress-materials.js','tenka-castle-models.js','tenka-castle-precincts.js','tenka-battlefield.js','tenka-battle-environment.js','tenka-battle-2d.js','tenka-battle-scenes.js','tenka-systems.js','tenka-dynasty.js','tenka-tactics.js','tenka-orders.js','tenka-retainers.js','tenka-allies.js','tenka-diplomacy.js','tenka-transfers.js','tenka-routes.js','tenka-supplies.js','tenka-ui.js'])vm.runInContext(fs.readFileSync(path.join(root,name),'utf8'),context,{filename:name});
+ for(const name of ['tenka-calendar.js','tenka-auto-battle.js','tenka-turn-ui.js','tenka-portraits.js','tenka-castles.js','tenka-fortress-materials.js','tenka-castle-models.js','tenka-castle-precincts.js','tenka-battlefield.js','tenka-battle-environment.js','tenka-battle-2d.js','tenka-battle-scenes.js','tenka-systems.js','tenka-dynasty.js','tenka-tactics.js','tenka-orders.js','tenka-retainers.js','tenka-allies.js','tenka-diplomacy.js','tenka-transfers.js','tenka-routes.js','tenka-supplies.js','tenka-ui.js'])vm.runInContext(fs.readFileSync(path.join(root,name),'utf8'),context,{filename:name});
  vm.runInContext(script,context,{filename:'index.inline.js'});
  return {Game:context.TenkaGame,Dynasty:context.TenkaDynasty,Systems:context.TenkaSystems,Tactics:context.TenkaTactics,Three:context.__ThreeForTests,context,values};
 }
