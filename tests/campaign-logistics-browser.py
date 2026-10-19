@@ -218,6 +218,8 @@ def main():
         browser = playwright.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
         for width in map(int, args.widths.split(',')):
             context = browser.new_context(viewport={'width': width, 'height': 1050 if width > 600 else 844})
+            # This regression exercises the optional production WebGL battle renderer.
+            context.add_init_script("localStorage.setItem('tenka-battle-renderer', '3d')")
             context.set_default_navigation_timeout(60000); context.set_default_timeout(30000)
             page = context.new_page()
             page.on('pageerror', lambda error: errors.append(str(error)))

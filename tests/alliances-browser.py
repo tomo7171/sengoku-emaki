@@ -307,6 +307,8 @@ def main():
         browser = playwright.chromium.launch(executable_path='/usr/bin/chromium', args=['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
         for width in map(int, args.widths.split(',')):
             context = browser.new_context(viewport={'width': width, 'height': 1050 if width > 600 else 844})
+            # This regression exercises the optional production WebGL battle renderer.
+            context.add_init_script("localStorage.setItem('tenka-battle-renderer', '3d')")
             # Software WebGL may compile the national map again on reload.
             context.set_default_navigation_timeout(60000)
             page = context.new_page()

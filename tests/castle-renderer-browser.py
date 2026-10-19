@@ -110,6 +110,8 @@ def main():
         for width in map(int, args.widths.split(',')):
             for case in cases if width > 600 else cases[:1]:
                 context = browser.new_context(viewport={'width': width, 'height': 1000 if width > 600 else 844})
+                # This regression exercises the optional production WebGL battle renderer.
+                context.add_init_script("localStorage.setItem('tenka-battle-renderer', '3d')")
                 page = context.new_page()
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.on('console', lambda message: errors.append(message.text) if message.type == 'error' else None)

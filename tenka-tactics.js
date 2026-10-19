@@ -33,11 +33,15 @@
   const regionalRules = (battle) => battle.battlefieldVersion >= 2;
   let original = null;
   let installed = null;
+  const verifiedBattles = new WeakMap();
 
-  function stamp(state) {
+  function strategicSignature(state) {
     const { selectedCastleId, lastBattle, threats, aiReports, aiBattles, ...rest } = state;
+    return JSON.stringify(rest);
+  }
+  function stamp(state) {
     let hash = 2166136261;
-    for (const character of JSON.stringify(rest)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+    for (const character of strategicSignature(state)) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
     return hash.toString(16);
   }
   function bounds(battle) {
@@ -776,7 +780,7 @@
     if (battle.defending && battle.phase === "finished") {
       battle.playerWon = battle.winner === "defender";
       if (battle.playerWon) event(battle, "守備軍が敵の侵攻を退けました。城と領民を守り抜きました。");
-      else event(battle, "本郭を失いました。残存兵と家臣の行方を評定で確認してください。");
+      else event(battle, battle.mode === "field" ? "野戦で敗れ、残存兵が退きました。城の守備と家臣の行方を評定で確認してください。" : "本郭を失いました。残存兵と家臣の行方を評定で確認してください。");
     }
   }
   function result(battle) {
@@ -810,33 +814,81 @@
     }
     report.tacticsVersion = 1;
     if (battle.defending) {
-      report.message = `${battle.targetCastle.name}の籠城戦は${report.playerWon ? "防衛成功" : "落城"}。守備軍の損失 ${report.enemyCasualties.toLocaleString("ja-JP")}、敵軍の損失 ${report.casualties.toLocaleString("ja-JP")}。兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を消費。`;
-      report.phases[0].text = "城内の曲輪に守備隊を配置し、籠城を指揮しました。";
-      report.phases[2].title = report.playerWon ? "防衛成功" : "落城";
+      const defeat = battle.mode === "field" ? "野戦敗北" : "落城";
+      report.message = `${battle.targetCastle.name}の${battle.mode === "field" ? "迎撃野戦" : "籠城戦"}は${report.playerWon ? "防衛成功" : defeat}。守備軍の損失 ${report.enemyCasualties.toLocaleString("ja-JP")}、敵軍の損失 ${report.casualties.toLocaleString("ja-JP")}。兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を消費。`;
+      report.phases[0].text = battle.mode === "field" ? "守備軍を野戦に配置し、敵の侵攻を迎え撃ちました。" : "城内の曲輪に守備隊を配置し、籠城を指揮しました。";
+      report.phases[2].title = report.playerWon ? "防衛成功" : defeat;
     } else report.message += ` 兵糧 ${report.supplyConsumed.toLocaleString("ja-JP")}を追加消費。`;
     if (report.supportReports?.length) report.message += ` 同盟援軍の損失 ${report.supportReports.reduce((total, support) => total + support.casualties, 0).toLocaleString("ja-JP")}人、帰還 ${report.supportReports.reduce((total, support) => total + support.survivors, 0).toLocaleString("ja-JP")}人。`;
     return report;
   }
+  function* replayBattle(state, battle) {
+    if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
+    const battlefieldVersion = battle.battlefieldVersion ?? 0;
+    if (![0, 1, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
+    let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion, carriedSupply: battle.carriedSupply }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion, carriedSupply: battle.carriedSupply });
+    for (let index = 0; index < battle.ledger.length; index++) {
+      const record = battle.ledger[index];
+      if (["deploy", "order", "formation", "stance", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
+        const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "stance" ? stance(replay, record.command.unitId, record.command.stance) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
+        if (!answer.ok) return null;
+        replay = answer.battle;
+      } else if (record.kind === "start" && replay.phase === "deployment") replay = original.start(replay);
+      else if (record.kind === "tick" && replay.phase === "fighting" && Number.isInteger(record.steps) && record.steps > 0 && record.steps <= 8) {
+        for (let step = 0; step < record.steps && replay.phase === "fighting"; step++) {
+          tick(replay);
+          yield { completed: index, total: battle.ledger.length, percent: Math.floor((index + (step + 1) / record.steps) / battle.ledger.length * 100) };
+        }
+        replay.ledger.push(copy(record));
+      } else return null;
+      yield { completed: index + 1, total: battle.ledger.length, percent: Math.floor((index + 1) / battle.ledger.length * 100) };
+    }
+    // Real-time fractional remainders are not part of the command ledger.
+    replay.stepRemainder = battle.stepRemainder;
+    return replay.phase === "finished" && JSON.stringify(replay) === JSON.stringify(battle) ? result(replay) : null;
+  }
+  function cachedVerification(state, battle) {
+    const cached = battle && verifiedBattles.get(battle);
+    return cached && cached.state === strategicSignature(state) && cached.battle === JSON.stringify(battle) ? copy(cached.report) : null;
+  }
   function verify(state, battle) {
     try {
-      if (!battle || battle.phase !== "finished" || battle.stateStamp !== stamp(state) || !Array.isArray(battle.ledger) || battle.ledger.length > 8000) return null;
-      const battlefieldVersion = battle.battlefieldVersion ?? 0;
-      if (![0, 1, root.TenkaBattlefield?.version].includes(battlefieldVersion)) return null;
-      let replay = battle.defending ? createDefense(state, { sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode }, { battlefieldVersion, carriedSupply: battle.carriedSupply }) : create({ state, sourceId: battle.sourceId, targetId: battle.targetId, mode: battle.mode, battlefieldVersion, carriedSupply: battle.carriedSupply });
-      for (const record of battle.ledger) {
-        if (["deploy", "order", "formation", "stance", "ambush", "fieldwork-place", "fieldwork-move", "fieldwork-remove"].includes(record.kind)) {
-          const answer = record.kind === "deploy" ? deploy(replay, record.command) : record.kind === "order" ? order(replay, record.command) : record.kind === "formation" ? formation(replay, record.command.unitId, record.command.formation) : record.kind === "stance" ? stance(replay, record.command.unitId, record.command.stance) : record.kind === "fieldwork-place" ? placeFortification(replay, record.command) : record.kind === "fieldwork-move" ? moveFortification(replay, record.command) : record.kind === "fieldwork-remove" ? removeFortification(replay, record.command.id) : ambush(replay, record.command.unitId);
-          if (!answer.ok) return null;
-          replay = answer.battle;
-        } else if (record.kind === "start" && replay.phase === "deployment") replay = original.start(replay);
-        else if (record.kind === "tick" && replay.phase === "fighting" && Number.isInteger(record.steps) && record.steps > 0 && record.steps <= 8) {
-          for (let step = 0; step < record.steps && replay.phase === "fighting"; step++) tick(replay);
-          replay.ledger.push(copy(record));
-        } else return null;
-      }
-      // Real-time fractional remainders are not part of the command ledger.
-      replay.stepRemainder = battle.stepRemainder;
-      return replay.phase === "finished" && JSON.stringify(replay) === JSON.stringify(battle) ? result(replay) : null;
+      const cached = cachedVerification(state, battle);
+      if (cached) return cached;
+      const replay = replayBattle(state, battle);
+      let step;
+      do { step = replay.next(); } while (!step.done);
+      return step.value;
+    } catch (_) { return null; }
+  }
+  async function verifyAsync(state, battle, options = {}) {
+    try {
+      if (options.signal?.aborted) return null;
+      const cached = cachedVerification(state, battle);
+      if (cached) return cached;
+      // Snapshot both inputs before yielding: neither an order issued during
+      // verification nor an edited survivor may earn a preverified result.
+      const stateSignature = strategicSignature(state), battleSignature = JSON.stringify(battle);
+      const replay = replayBattle(copy(state), copy(battle));
+      const now = () => root.performance?.now?.() ?? Date.now();
+      let deadline = now() + 8, sinceYield = 0, step;
+      const notify = progress => { try { options.onProgress?.(progress); } catch (_) { /* Progress observers cannot change verification rules. */ } };
+      notify({ completed: 0, total: battle?.ledger?.length || 0, percent: 0 });
+      // Give the pending-result banner a paint before reconstructing combat.
+      await new Promise(resolve => root.setTimeout(resolve, 0));
+      do {
+        if (options.signal?.aborted) return null;
+        step = replay.next();
+        if (!step.done && (++sinceYield >= 4 || now() >= deadline)) {
+          notify(step.value);
+          await new Promise(resolve => root.setTimeout(resolve, 0));
+          sinceYield = 0; deadline = now() + 8;
+        }
+      } while (!step.done);
+      if (!step.value || options.signal?.aborted || strategicSignature(state) !== stateSignature || JSON.stringify(battle) !== battleSignature) return null;
+      verifiedBattles.set(battle, { state: stateSignature, battle: battleSignature, report: copy(step.value) });
+      notify({ completed: battle.ledger.length, total: battle.ledger.length, percent: 100 });
+      return copy(step.value);
     } catch (_) { return null; }
   }
   function distribute(units, count) {
@@ -931,5 +983,5 @@
     installed = { ...core, create, deploy, order, damage, move, tick, result, verify };
     return installed;
   }
-  root.TenkaTactics = Object.freeze({ version: 2, formations: FORMATIONS, stances: STANCES, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, stance, tacticalView, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, result, stamp });
+  root.TenkaTactics = Object.freeze({ version: 2, formations: FORMATIONS, stances: STANCES, matchups: MATCHUPS, fortificationTypes: FORTIFICATIONS, install, prepare, createDefense, settleDefense, deploy, order, formation, stance, tacticalView, ambush, canAmbush, deploymentZone, placeFortification, moveFortification, removeFortification, fortificationBudget, fortificationContains, offsets, verify, verifyAsync, result, stamp });
 })(typeof window !== "undefined" ? window : globalThis);

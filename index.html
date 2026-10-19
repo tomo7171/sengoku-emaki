@@ -30,27 +30,30 @@
 </head>
   <body>
     <div id="root"><div style="max-width:560px;margin:12vh auto;padding:28px;font-family:serif;color:#304638;background:#f7f5ee;border:1px solid #d9dfcd;border-radius:10px;text-align:center"><h1>天下布武 — 全国版</h1><p>ゲームを読み込んでいます…</p><p>表示が進まない場合は、このページを再読み込みしてください。</p><a href="?reload=nation2">再読み込み</a><noscript><p>ゲームの操作にはJavaScriptが必要です。ブラウザーの設定でJavaScriptを有効にしてください。</p></noscript></div></div>
-    <link rel="stylesheet" href="tenka-ui.css?v=20261019-campaign-strategy">
-    <link rel="stylesheet" href="tenka-routes.css?v=20261019-campaign-strategy">
-    <link rel="stylesheet" href="tenka-supplies.css?v=20261019-campaign-strategy">
+    <link rel="stylesheet" href="tenka-ui.css?v=20261019-battle-resolution-v2">
+    <link rel="stylesheet" href="tenka-routes.css?v=20261019-battle-resolution-v2">
+    <link rel="stylesheet" href="tenka-supplies.css?v=20261019-battle-resolution-v2">
+    <link rel="stylesheet" href="tenka-battle-session.css?v=20261019-battle-resolution-v2">
 <script src="tenka-portraits.js?v=20261014-daimyo-portraits"></script>
 <script src="tenka-castles.js?v=20261015-castle-deployment"></script>
 <script src="tenka-fortress-materials.js?v=20261016-castle-precincts"></script>
 <script src="tenka-castle-models.js?v=20261016-castle-precincts"></script>
 <script src="tenka-castle-precincts.js?v=20261016-castle-precincts"></script>
-<script src="tenka-battlefield.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-battle-environment.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-systems.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-dynasty.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-tactics.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-orders.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-retainers.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-allies.js?v=20261019-campaign-strategy"></script>
-    <script src="tenka-diplomacy.js?v=20261019-campaign-strategy"></script>
-    <script src="tenka-transfers.js?v=20261019-campaign-strategy"></script>
-    <script src="tenka-routes.js?v=20261019-campaign-strategy"></script>
-    <script src="tenka-supplies.js?v=20261019-campaign-strategy"></script>
-<script src="tenka-ui.js?v=20261019-campaign-strategy"></script>
+<script src="tenka-battlefield.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-battle-environment.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-battle-2d.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-battle-scenes.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-systems.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-dynasty.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-tactics.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-orders.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-retainers.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-allies.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-diplomacy.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-transfers.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-routes.js?v=20261019-battle-resolution-v2"></script>
+    <script src="tenka-supplies.js?v=20261019-battle-resolution-v2"></script>
+<script src="tenka-ui.js?v=20261019-battle-resolution-v2"></script>
 <script>(function(){var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=Object.getOwnPropertyNames,i=Object.getPrototypeOf,a=Object.prototype.hasOwnProperty,o=(e,t,n)=>()=>{if(n)throw n[0];try{return e&&(t=e(e=0)),t}catch(e){throw n=[e],e}},s=(e,t)=>()=>(t||(e((t={exports:{}}).exports,t),e=null),t.exports),c=(e,n)=>{let r={};for(var i in e)t(r,i,{get:e[i],enumerable:!0});return n||t(r,Symbol.toStringTag,{value:`Module`}),r},l=(e,i,o,s)=>{if(i&&typeof i==`object`||typeof i==`function`)for(var c=r(i),l=0,u=c.length,d;l<u;l++)d=c[l],!a.call(e,d)&&d!==o&&t(e,d,{get:(e=>i[e]).bind(null,d),enumerable:!(s=n(i,d))||s.enumerable});return e},u=(n,r,o)=>(o=n==null?{}:e(i(n)),l(r||!n||!n.__esModule||!a.call(n,`default`)?t(o,`default`,{value:n,enumerable:!0}):o,n)),d=s((e=>{var t=Symbol.for(`react.transitional.element`),n=Symbol.for(`react.portal`),r=Symbol.for(`react.fragment`),i=Symbol.for(`react.strict_mode`),a=Symbol.for(`react.profiler`),o=Symbol.for(`react.consumer`),s=Symbol.for(`react.context`),c=Symbol.for(`react.forward_ref`),l=Symbol.for(`react.suspense`),u=Symbol.for(`react.memo`),d=Symbol.for(`react.lazy`),f=Symbol.for(`react.activity`),p=Symbol.for(`react.view_transition`),m=Symbol.iterator;function h(e){return typeof e!=`object`||!e?null:(e=m&&e[m]||e[`@@iterator`],typeof e==`function`?e:null)}var g={isMounted:function(){return!1},enqueueForceUpdate:function(){},enqueueReplaceState:function(){},enqueueSetState:function(){}},_=Object.assign,v={};function y(e,t,n){this.props=e,this.context=t,this.refs=v,this.updater=n||g}y.prototype.isReactComponent={},y.prototype.setState=function(e,t){if(typeof e!=`object`&&typeof e!=`function`&&e!=null)throw Error(`takes an object of state variables to update or a function which returns an object of state variables.`);this.updater.enqueueSetState(this,e,t,`setState`)},y.prototype.forceUpdate=function(e){this.updater.enqueueForceUpdate(this,e,`forceUpdate`)};function b(){}b.prototype=y.prototype;function x(e,t,n){this.props=e,this.context=t,this.refs=v,this.updater=n||g}var S=x.prototype=new b;S.constructor=x,_(S,y.prototype),S.isPureReactComponent=!0;var C=Array.isArray;function w(){}var T={H:null,A:null,T:null,S:null},E=Object.prototype.hasOwnProperty;function D(e,n,r){var i=r.ref;return{$$typeof:t,type:e,key:n,ref:i===void 0?null:i,props:r}}function O(e,t){return D(e.type,t,e.props)}function k(e){return typeof e==`object`&&!!e&&e.$$typeof===t}function A(e){var t={"=":`=0`,":":`=2`};return`$`+e.replace(/[=:]/g,function(e){return t[e]})}var j=/\/+/g;function ee(e,t){return typeof e==`object`&&e&&e.key!=null?A(``+e.key):t.toString(36)}function M(e){switch(e.status){case`fulfilled`:return e.value;case`rejected`:throw e.reason;default:switch(typeof e.status==`string`?e.then(w,w):(e.status=`pending`,e.then(function(t){e.status===`pending`&&(e.status=`fulfilled`,e.value=t)},function(t){e.status===`pending`&&(e.status=`rejected`,e.reason=t)})),e.status){case`fulfilled`:return e.value;case`rejected`:throw e.reason}}throw e}function te(e,r,i,a,o){var s=typeof e;(s===`undefined`||s===`boolean`)&&(e=null);var c=!1;if(e===null)c=!0;else switch(s){case`bigint`:case`string`:case`number`:c=!0;break;case`object`:switch(e.$$typeof){case t:case n:c=!0;break;case d:return c=e._init,te(c(e._payload),r,i,a,o)}}if(c)return o=o(e),c=a===``?`.`+ee(e,0):a,C(o)?(i=``,c!=null&&(i=c.replace(j,`$&/`)+`/`),te(o,r,i,``,function(e){return e})):o!=null&&(k(o)&&(o=O(o,i+(o.key==null||e&&e.key===o.key?``:(``+o.key).replace(j,`$&/`)+`/`)+c)),r.push(o)),1;c=0;var l=a===``?`.`:a+`:`;if(C(e))for(var u=0;u<e.length;u++)a=e[u],s=l+ee(a,u),c+=te(a,r,i,s,o);else if(u=h(e),typeof u==`function`)for(e=u.call(e),u=0;!(a=e.next()).done;)a=a.value,s=l+ee(a,u++),c+=te(a,r,i,s,o);else if(s===`object`){if(typeof e.then==`function`)return te(M(e),r,i,a,o);throw r=String(e),Error(`Objects are not valid as a React child (found: `+(r===`[object Object]`?`object with keys {`+Object.keys(e).join(`, `)+`}`:r)+`). If you meant to render a collection of children, use an array instead.`)}return c}function N(e,t,n){if(e==null)return e;var r=[],i=0;return te(e,r,``,``,function(e){return t.call(n,e,i++)}),r}function P(e){if(e._status===-1){var t=e._result,n=t();n.then(function(t){(e._status===0||e._status===-1)&&(e._status=1,e._result=t,n.status===void 0&&(n.status=`fulfilled`,n.value=t))},function(t){(e._status===0||e._status===-1)&&(e._status=2,e._result=t,n.status===void 0&&(n.status=`rejected`,n.reason=t))}),e._status===-1&&(e._status=0,e._result=n)}if(e._status===1)return e._result.default;throw e._result}var F=typeof reportError==`function`?reportError:function(e){if(typeof window==`object`&&typeof window.ErrorEvent==`function`){var t=new window.ErrorEvent(`error`,{bubbles:!0,cancelable:!0,message:typeof e==`object`&&e&&typeof e.message==`string`?String(e.message):String(e),error:e});if(!window.dispatchEvent(t))return}else if(typeof process==`object`&&typeof process.emit==`function`){process.emit(`uncaughtException`,e);return}console.error(e)};function ne(e){var t=T.T,n={};n.types=t===null?null:t.types,T.T=n;try{var r=e(),i=T.S;i!==null&&i(n,r),typeof r==`object`&&r&&typeof r.then==`function`&&r.then(w,F)}catch(e){F(e)}finally{t!==null&&n.types!==null&&(t.types=n.types),T.T=t}}function re(e){var t=T.T;if(t!==null){var n=t.types;n===null?t.types=[e]:n.indexOf(e)===-1&&n.push(e)}else ne(re.bind(null,e))}var I={map:N,forEach:function(e,t,n){N(e,function(){t.apply(this,arguments)},n)},count:function(e){var t=0;return N(e,function(){t++}),t},toArray:function(e){return N(e,function(e){return e})||[]},only:function(e){if(!k(e))throw Error(`React.Children.only expected to receive a single React element child.`);return e}};e.Activity=f,e.Children=I,e.Component=y,e.Fragment=r,e.Profiler=a,e.PureComponent=x,e.StrictMode=i,e.Suspense=l,e.ViewTransition=p,e.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE=T,e.__COMPILER_RUNTIME={__proto__:null,c:function(e){return T.H.useMemoCache(e)}},e.addTransitionType=re,e.cache=function(e){return function(){return e.apply(null,arguments)}},e.cacheSignal=function(){return null},e.cloneElement=function(e,t,n){if(e==null)throw Error(`The argument must be a React element, but you passed `+e+`.`);var r=_({},e.props),i=e.key;if(t!=null)for(a in t.key!==void 0&&(i=``+t.key),t)!E.call(t,a)||a===`key`||a===`__self`||a===`__source`||a===`ref`&&t.ref===void 0||(r[a]=t[a]);var a=arguments.length-2;if(a===1)r.children=n;else if(1<a){for(var o=Array(a),s=0;s<a;s++)o[s]=arguments[s+2];r.children=o}return D(e.type,i,r)},e.createContext=function(e){return e={$$typeof:s,_currentValue:e,_currentValue2:e,_threadCount:0,Provider:null,Consumer:null},e.Provider=e,e.Consumer={$$typeof:o,_context:e},e},e.createElement=function(e,t,n){var r,i={},a=null;if(t!=null)for(r in t.key!==void 0&&(a=``+t.key),t)E.call(t,r)&&r!==`key`&&r!==`__self`&&r!==`__source`&&(i[r]=t[r]);var o=arguments.length-2;if(o===1)i.children=n;else if(1<o){for(var s=Array(o),c=0;c<o;c++)s[c]=arguments[c+2];i.children=s}if(e&&e.defaultProps)for(r in o=e.defaultProps,o)i[r]===void 0&&(i[r]=o[r]);return D(e,a,i)},e.createRef=function(){return{current:null}},e.forwardRef=function(e){return{$$typeof:c,render:e}},e.isValidElement=k,e.lazy=function(e){return{$$typeof:d,_payload:{_status:-1,_result:e},_init:P}},e.memo=function(e,t){return{$$typeof:u,type:e,compare:t===void 0?null:t}},e.startTransition=ne,e.unstable_useCacheRefresh=function(){return T.H.useCacheRefresh()},e.use=function(e){return T.H.use(e)},e.useActionState=function(e,t,n){return T.H.useActionState(e,t,n)},e.useCallback=function(e,t){return T.H.useCallback(e,t)},e.useContext=function(e){return T.H.useContext(e)},e.useDebugValue=function(){},e.useDeferredValue=function(e,t){return T.H.useDeferredValue(e,t)},e.useEffect=function(e,t){return T.H.useEffect(e,t)},e.useEffectEvent=function(e){return T.H.useEffectEvent(e)},e.useId=function(){return T.H.useId()},e.useImperativeHandle=function(e,t,n){return T.H.useImperativeHandle(e,t,n)},e.useInsertionEffect=function(e,t){return T.H.useInsertionEffect(e,t)},e.useLayoutEffect=function(e,t){return T.H.useLayoutEffect(e,t)},e.useMemo=function(e,t){return T.H.useMemo(e,t)},e.useOptimistic=function(e,t){return T.H.useOptimistic(e,t)},e.useReducer=function(e,t,n){return T.H.useReducer(e,t,n)},e.useRef=function(e){return T.H.useRef(e)},e.useState=function(e){return T.H.useState(e)},e.useSyncExternalStore=function(e,t,n){return T.H.useSyncExternalStore(e,t,n)},e.useTransition=function(){return T.H.useTransition()},e.version=`19.3.0`})),f=s(((e,t)=>{t.exports=d()})),p=s((e=>{function t(e,t){var n=e.length;e.push(t);a:for(;0<n;){var r=n-1>>>1,a=e[r];if(0<i(a,t))e[r]=t,e[n]=a,n=r;else break a}}function n(e){return e.length===0?null:e[0]}function r(e){if(e.length===0)return null;var t=e[0],n=e.pop();if(n!==t){e[0]=n;a:for(var r=0,a=e.length,o=a>>>1;r<o;){var s=2*(r+1)-1,c=e[s],l=s+1,u=e[l];if(0>i(c,n))l<a&&0>i(u,c)?(e[r]=u,e[l]=n,r=l):(e[r]=c,e[s]=n,r=s);else if(l<a&&0>i(u,n))e[r]=u,e[l]=n,r=l;else break a}}return t}function i(e,t){var n=e.sortIndex-t.sortIndex;return n===0?e.id-t.id:n}if(e.unstable_now=void 0,typeof performance==`object`&&typeof performance.now==`function`){var a=performance;e.unstable_now=function(){return a.now()}}else{var o=Date,s=o.now();e.unstable_now=function(){return o.now()-s}}var c=[],l=[],u=1,d=null,f=3,p=!1,m=!1,h=!1,g=!1,_=typeof setTimeout==`function`?setTimeout:null,v=typeof clearTimeout==`function`?clearTimeout:null,y=typeof setImmediate<`u`?setImmediate:null;function b(e){for(var i=n(l);i!==null;){if(i.callback===null)r(l);else if(i.startTime<=e)r(l),i.sortIndex=i.expirationTime,t(c,i);else break;i=n(l)}}function x(e){if(h=!1,b(e),!m){if(n(c)!==null)m=!0,S||(S=!0,O());else{var t=n(l);t!==null&&j(x,t.startTime-e)}}}var S=!1,C=-1,w=5,T=-1;function E(){return g?!0:!(e.unstable_now()-T<w)}function D(){if(g=!1,S){var t=e.unstable_now();T=t;var i=!0;try{a:{m=!1,h&&(h=!1,v(C),C=-1),p=!0;var a=f;try{b:{for(b(t),d=n(c);d!==null&&!(d.expirationTime>t&&E());){var o=d.callback;if(typeof o==`function`){d.callback=null,f=d.priorityLevel;var s=o(d.expirationTime<=t);if(t=e.unstable_now(),typeof s==`function`){d.callback=s,b(t),i=!0;break b}d===n(c)&&r(c),b(t)}else r(c);d=n(c)}if(d!==null)i=!0;else{var u=n(l);u!==null&&j(x,u.startTime-t),i=!1}}break a}finally{d=null,f=a,p=!1}i=void 0}}finally{i?O():S=!1}}}var O;if(typeof y==`function`)O=function(){y(D)};else if(typeof MessageChannel<`u`){var k=new MessageChannel,A=k.port2;k.port1.onmessage=D,O=function(){A.postMessage(null)}}else O=function(){_(D,0)};function j(t,n){C=_(function(){t(e.unstable_now())},n)}e.unstable_IdlePriority=5,e.unstable_ImmediatePriority=1,e.unstable_LowPriority=4,e.unstable_NormalPriority=3,e.unstable_Profiling=null,e.unstable_UserBlockingPriority=2,e.unstable_cancelCallback=function(e){e.callback=null},e.unstable_forceFrameRate=function(e){0>e||125<e?console.error(`forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported`):w=0<e?Math.floor(1e3/e):5},e.unstable_getCurrentPriorityLevel=function(){return f},e.unstable_next=function(e){switch(f){case 1:case 2:case 3:var t=3;break;default:t=f}var n=f;f=t;try{return e()}finally{f=n}},e.unstable_requestPaint=function(){g=!0},e.unstable_runWithPriority=function(e,t){switch(e){case 1:case 2:case 3:case 4:case 5:break;default:e=3}var n=f;f=e;try{return t()}finally{f=n}},e.unstable_scheduleCallback=function(r,i,a){var o=e.unstable_now();switch(typeof a==`object`&&a?(a=a.delay,a=typeof a==`number`&&0<a?o+a:o):a=o,r){case 1:var s=-1;break;case 2:s=250;break;case 5:s=1073741823;break;case 4:s=1e4;break;default:s=5e3}return s=a+s,r={id:u++,callback:i,priorityLevel:r,startTime:a,expirationTime:s,sortIndex:-1},a>o?(r.sortIndex=a,t(l,r),n(c)===null&&r===n(l)&&(h?(v(C),C=-1):h=!0,j(x,a-o))):(r.sortIndex=s,t(c,r),m||p||(m=!0,S||(S=!0,O()))),r},e.unstable_shouldYield=E,e.unstable_wrapCallback=function(e){var t=f;return function(){var n=f;f=t;try{return e.apply(this,arguments)}finally{f=n}}}})),m=s(((e,t)=>{t.exports=p()})),h=s((e=>{var t=f();function n(e){var t=`https://react.dev/errors/`+e;if(1<arguments.length){t+=`?args[]=`+encodeURIComponent(arguments[1]);for(var n=2;n<arguments.length;n++)t+=`&args[]=`+encodeURIComponent(arguments[n])}return`Minified React error #`+e+`; visit `+t+` for the full message or use the non-minified dev environment for full errors and additional helpful warnings.`}function r(){}var i={d:{f:r,r:function(){throw Error(n(522))},D:r,C:r,L:r,m:r,X:r,S:r,M:r},p:0,findDOMNode:null},a=Symbol.for(`react.portal`),o=Symbol.for(`react.recoverable`),s=Symbol.for(`react.optimistic_key`);function c(e,t,n){var r=3<arguments.length&&arguments[3]!==void 0?arguments[3]:null;return{$$typeof:a,key:r==null?null:r===s?s:``+r,children:e,containerInfo:t,implementation:n}}var l=t.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;function u(e,t){if(e===`font`)return``;if(typeof t==`string`)return t===`use-credentials`?t:``}e.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE=i,e.browser=function(e){return{$$typeof:o,_reason:e}},e.createPortal=function(e,t){var r=2<arguments.length&&arguments[2]!==void 0?arguments[2]:null;if(!t||t.nodeType!==1&&t.nodeType!==9&&t.nodeType!==11)throw Error(n(299));return c(e,t,null,r)},e.flushSync=function(e){var t=l.T,n=i.p;try{if(l.T=null,i.p=2,e)return e()}finally{l.T=t,i.p=n,i.d.f()}},e.preconnect=function(e,t){typeof e==`string`&&(t?(t=t.crossOrigin,t=typeof t==`string`?t===`use-credentials`?t:``:void 0):t=null,i.d.C(e,t))},e.prefetchDNS=function(e){typeof e==`string`&&i.d.D(e)},e.preinit=function(e,t){if(typeof e==`string`&&t&&typeof t.as==`string`){var n=t.as,r=u(n,t.crossOrigin),a=typeof t.integrity==`string`?t.integrity:void 0,o=typeof t.fetchPriority==`string`?t.fetchPriority:void 0;n===`style`?i.d.S(e,typeof t.precedence==`string`?t.precedence:void 0,{crossOrigin:r,integrity:a,fetchPriority:o}):n===`script`&&i.d.X(e,{crossOrigin:r,integrity:a,fetchPriority:o,nonce:typeof t.nonce==`string`?t.nonce:void 0})}},e.preinitModule=function(e,t){if(typeof e==`string`){if(typeof t==`object`&&t){if(t.as==null||t.as===`script`){var n=u(t.as,t.crossOrigin);i.d.M(e,{crossOrigin:n,integrity:typeof t.integrity==`string`?t.integrity:void 0,nonce:typeof t.nonce==`string`?t.nonce:void 0,fetchPriority:typeof t.fetchPriority==`string`?t.fetchPriority:void 0})}}else t??i.d.M(e)}},e.preload=function(e,t){if(typeof e==`string`&&typeof t==`object`&&t&&typeof t.as==`string`){var n=t.as,r=u(n,t.crossOrigin);i.d.L(e,n,{crossOrigin:r,integrity:typeof t.integrity==`string`?t.integrity:void 0,nonce:typeof t.nonce==`string`?t.nonce:void 0,type:typeof t.type==`string`?t.type:void 0,fetchPriority:typeof t.fetchPriority==`string`?t.fetchPriority:void 0,referrerPolicy:typeof t.referrerPolicy==`string`?t.referrerPolicy:void 0,imageSrcSet:typeof t.imageSrcSet==`string`?t.imageSrcSet:void 0,imageSizes:typeof t.imageSizes==`string`?t.imageSizes:void 0,media:typeof t.media==`string`?t.media:void 0})}},e.preloadModule=function(e,t){if(typeof e==`string`){if(t){var n=u(t.as,t.crossOrigin);i.d.m(e,{as:typeof t.as==`string`&&t.as!==`script`?t.as:void 0,crossOrigin:n,integrity:typeof t.integrity==`string`?t.integrity:void 0,nonce:typeof t.nonce==`string`?t.nonce:void 0,fetchPriority:typeof t.fetchPriority==`string`?t.fetchPriority:void 0})}else i.d.m(e)}},e.requestFormReset=function(e){i.d.r(e)},e.unstable_batchedUpdates=function(e,t){return e(t)},e.useFormState=function(e,t,n){return l.H.useFormState(e,t,n)},e.useFormStatus=function(){return l.H.useHostTransitionStatus()},e.version=`19.3.0`})),g=s(((e,t)=>{function n(){if(typeof __REACT_DEVTOOLS_GLOBAL_HOOK__<`u`&&typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE==`function`)try{__REACT_DEVTOOLS_GLOBAL_HOOK__.checkDCE(n)}catch(e){console.error(e)}}n(),t.exports=h()})),_=s((e=>{var t=m(),n=f(),r=g();function i(e){var t=`https://react.dev/errors/`+e;if(1<arguments.length){t+=`?args[]=`+encodeURIComponent(arguments[1]);for(var n=2;n<arguments.length;n++)t+=`&args[]=`+encodeURIComponent(arguments[n])}return`Minified React error #`+e+`; visit `+t+` for the full message or use the non-minified dev environment for full errors and additional helpful warnings.`}function a(e){return!(!e||e.nodeType!==1&&e.nodeType!==9&&e.nodeType!==11)}function o(e){for(var t=e,n=t;n&&!n.alternate;)t=n,t.flags&4098&&(e=t.return),n=t.return;for(;t.return;)t=t.return;return t.tag===3?e:null}function s(e){if(e.tag===13){var t=e.memoizedState;if(t===null&&(e=e.alternate,e!==null&&(t=e.memoizedState)),t!==null)return t.dehydrated}return null}function c(e){if(e.tag===31){var t=e.memoizedState;if(t===null&&(e=e.alternate,e!==null&&(t=e.memoizedState)),t!==null)return t.dehydrated}return null}function l(e){if(o(e)!==e)throw Error(i(188))}function u(e){var t=e.alternate;if(!t){if(t=o(e),t===null)throw Error(i(188));return t===e?e:null}for(var n=e,r=t;;){var a=n.return;if(a===null)break;var s=a.alternate;if(s===null){if(r=a.return,r!==null){n=r;continue}break}if(a.child===s.child){for(s=a.child;s;){if(s===n)return l(a),e;if(s===r)return l(a),t;s=s.sibling}throw Error(i(188))}if(n.return!==r.return)n=a,r=s;else{for(var c=!1,u=a.child;u;){if(u===n){c=!0,n=a,r=s;break}if(u===r){c=!0,r=a,n=s;break}u=u.sibling}if(!c){for(u=s.child;u;){if(u===n){c=!0,n=s,r=a;break}if(u===r){c=!0,r=s,n=a;break}u=u.sibling}if(!c)throw Error(i(189))}}if(n.alternate!==r)throw Error(i(190))}if(n.tag!==3)throw Error(i(188));return n.stateNode.current===n?e:t}function d(e){var t=e.tag;if(t===5||t===26||t===27||t===6)return e;for(e=e.child;e!==null;){if(t=d(e),t!==null)return t;e=e.sibling}return null}function p(e,t,n,r,i,a){for(;e!==null;){if((e.tag===5||e.tag===27||e.tag===6)&&n(e,r,i,a)||(e.tag!==22||e.memoizedState===null)&&(t||e.tag!==5&&e.tag!==27)&&p(e.child,t,n,r,i,a))return!0;e=e.sibling}return!1}function h(e){for(e=e.return;e!==null;){if(e.tag===3||e.tag===5||e.tag===27)return e;e=e.return}return null}function _(e){var t=!1;for(e=e.return;e!==null&&(e.tag===4&&(t=!0),e.tag!==3&&e.tag!==5&&e.tag!==27);)e=e.return;return t}function v(e){var t=[null,null],n=h(e);return n===null||y(t,e,n.child,{foundSelf:!1}),t}function y(e,t,n,r){for(;n!==null;){if(n===t)r.foundSelf=!0;else if(n.tag===5||n.tag===27||n.tag===6){if(r.foundSelf)return e[1]=n,!0;e[0]=n}else if((n.tag!==22||n.memoizedState===null)&&y(e,t,n.child,r))return!0;n=n.sibling}return!1}function b(e){switch(e.tag){case 5:case 27:case 6:return e.stateNode;case 3:return e.stateNode.containerInfo;default:throw Error(i(559))}}var x=null,S=null;function C(e,t,n){return e===n||e===t&&(x=e,!0)}function w(e,t,n){return e===n?(S=e,!1):e===t&&(S!==null&&(x=e),!0)}function T(e){if(e===null)return null;do e=e===null?null:e.return;while(e&&e.tag!==5&&e.tag!==27&&e.tag!==3);return e||null}function E(e,t,n){for(var r=0,i=e;i;i=n(i))r++;i=0;for(var a=t;a;a=n(a))i++;for(;0<r-i;)e=n(e),r--;for(;0<i-r;)t=n(t),i--;for(;r--;){if(e===t||t!==null&&e===t.alternate)return e;e=n(e),t=n(t)}return null}var D=Object.assign,O=Symbol.for(`react.element`),k=Symbol.for(`react.transitional.element`),A=Symbol.for(`react.portal`),j=Symbol.for(`react.fragment`),ee=Symbol.for(`react.strict_mode`),M=Symbol.for(`react.profiler`),te=Symbol.for(`react.consumer`),N=Symbol.for(`react.context`),P=Symbol.for(`react.forward_ref`),F=Symbol.for(`react.suspense`),ne=Symbol.for(`react.suspense_list`),re=Symbol.for(`react.memo`),I=Symbol.for(`react.lazy`),ie=Symbol.for(`react.activity`),ae=Symbol.for(`react.legacy_hidden`),oe=Symbol.for(`react.memo_cache_sentinel`),L=Symbol.for(`react.view_transition`),R=Symbol.for(`react.recoverable`),se=Symbol.iterator;function z(e){return typeof e!=`object`||!e?null:(e=se&&e[se]||e[`@@iterator`],typeof e==`function`?e:null)}var ce=Symbol.for(`react.client.reference`);function le(e){if(e==null)return null;if(typeof e==`function`)return e.$$typeof===ce?null:e.displayName||e.name||null;if(typeof e==`string`)return e;switch(e){case j:return`Fragment`;case M:return`Profiler`;case ee:return`StrictMode`;case F:return`Suspense`;case ne:return`SuspenseList`;case ie:return`Activity`;case L:return`ViewTransition`}if(typeof e==`object`)switch(e.$$typeof){case A:return`Portal`;case N:return e.displayName||`Context`;case te:return(e._context.displayName||`Context`)+`.Consumer`;case P:var t=e.render;return e=e.displayName,e||=(e=t.displayName||t.name||``,e===``?`ForwardRef`:`ForwardRef(`+e+`)`),e;case re:return t=e.displayName||null,t===null?le(e.type)||`Memo`:t;case I:t=e._payload,e=e._init;try{return le(e(t))}catch{}}return null}var ue=Array.isArray,B=n.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,de=r.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,fe={pending:!1,data:null,method:null,action:null},pe=[],me=-1;function he(e){return{current:e}}function ge(e){0>me||(e.current=pe[me],pe[me]=null,me--)}function V(e,t){me++,pe[me]=e.current,e.current=t}var _e=he(null),ve=he(null),H=he(null),U=he(null);function ye(e,t){switch(V(H,t),V(ve,e),V(_e,null),t.nodeType){case 9:case 11:e=(e=t.documentElement)&&(e=e.namespaceURI)?mp(e):0;break;default:if(e=t.tagName,t=t.namespaceURI)t=mp(t),e=hp(t,e);else switch(e){case`svg`:e=1;break;case`math`:e=2;break;default:e=0}}ge(_e),V(_e,e)}function W(){ge(_e),ge(ve),ge(H)}function be(e){var t=e.memoizedState;t!==null&&(dh._currentValue=t.memoizedState,V(U,e)),t=_e.current;var n=hp(t,e.type);t!==n&&(V(ve,e),V(_e,n))}function xe(e){ve.current===e&&(ge(_e),ge(ve)),U.current===e&&(ge(U),dh._currentValue=fe)}var Se,Ce;function we(e){if(Se===void 0)try{throw Error()}catch(e){var t=e.stack.trim().match(/\n( *(at )?)/);Se=t&&t[1]||``,Ce=-1<e.stack.indexOf(`
     at`)?` (<anonymous>)`:-1<e.stack.indexOf(`@`)?`@unknown:0:0`:``}return`
 `+Se+e+Ce}var Te=!1;function Ee(e,t){if(!e||Te)return``;Te=!0;var n=Error.prepareStackTrace;Error.prepareStackTrace=void 0;try{var r={DetermineComponentFrameRoot:function(){try{if(t){var n=function(){throw Error()};if(Object.defineProperty(n.prototype,"props",{set:function(){throw Error()}}),typeof Reflect==`object`&&Reflect.construct){try{Reflect.construct(n,[])}catch(e){var r=e}Reflect.construct(e,[],n)}else{try{n.call()}catch(e){r=e}n=!1;try{var i=Object.getOwnPropertyDescriptor(e.prototype,`props`);Object.defineProperty(e.prototype,"props",{configurable:!0,set:function(){throw Error()}}),n=!0,new e}finally{n&&(i===void 0?delete e.prototype.props:Object.defineProperty(e.prototype,"props",i))}}}else{try{throw Error()}catch(e){r=e}(n=e())&&typeof n.catch==`function`&&n.catch(function(){})}}catch(e){if(e&&r&&typeof e.stack==`string`)return[e.stack,r.stack]}return[null,null]}};r.DetermineComponentFrameRoot.displayName=`DetermineComponentFrameRoot`;var i=Object.getOwnPropertyDescriptor(r.DetermineComponentFrameRoot,`name`);i&&i.configurable&&Object.defineProperty(r.DetermineComponentFrameRoot,"name",{value:`DetermineComponentFrameRoot`});var a=r.DetermineComponentFrameRoot(),o=a[0],s=a[1];if(o&&s){var c=o.split(`
@@ -6556,6 +6559,10 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       selectedStructureRef = (0,Q_.useRef)(null),
       placementRotationRef = (0,Q_.useRef)(0),
       baileyNamesRef = (0,Q_.useRef)(true),
+      settlementBusyRef = (0,Q_.useRef)(false),
+      settlementBannerRef = (0,Q_.useRef)(null),
+      graphicsPauseRef = (0,Q_.useRef)(null),
+      rendererModeRef = (0,Q_.useRef)('2d'),
       m = (0, Q_.useRef)(`move`),
       h = (0, Q_.useRef)({}),
       [g, _] = (0, Q_.useState)(e),
@@ -6566,6 +6573,8 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       [placementRotation,setPlacementRotation] = (0,Q_.useState)(0),
       [castleExpanded,setCastleExpanded] = (0,Q_.useState)(false),
       [showBaileyNames,setShowBaileyNames] = (0,Q_.useState)(true),
+      [rendererMode,setRendererMode] = (0,Q_.useState)(()=>{try{return localStorage.getItem('tenka-battle-renderer')==='3d'?'3d':'2d';}catch{return '2d';}}),
+      [settlement,setSettlement] = (0,Q_.useState)({status:'idle',message:'',progress:null}),
       [S, C] = (0, Q_.useState)(!1),
       [w, T] = (0, Q_.useState)(1),
       [E, D] = (0, Q_.useState)(
@@ -6589,6 +6598,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       ie = g.phase === `fighting`,
       ae = g.phase === `finished`,
       castleView = window.TenkaCastles?.scene(g),
+      fieldScene = window.TenkaBattleScenes?.view(g),
       baileyViews = (window.TenkaCastlePrecincts?.describe(g) || []).filter(item => item.role !== `support`),
       oe = g.friendlyOfficers || e.friendlyOfficers || g.eligibleOfficers || e.eligibleOfficers || [],
       L = (e) =>
@@ -6600,6 +6610,27 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       R = I
         ? oe.find((e) => e.id === N.commanderId)
         : oe.find((e) => e.id === re?.commanderId),
+      finishSettlement = async (battle) => {
+        if(l.current)return true;
+        if(settlementBusyRef.current)return false;
+        settlementBusyRef.current=true;d.current=true;C(true);
+        setSettlement({status:'pending',message:'戦果・兵数・兵糧を確認しています…',progress:null});
+        try{
+          await new Promise(resolve=>setTimeout(resolve,0));
+          const result=await c.current.onComplete?.(battle,{onProgress:progress=>{
+            const total=progress?.total||1,completed=progress?.completed||0,percent=Math.min(100,Math.floor(completed/total*100));
+            setSettlement({status:'pending',message:'戦果・兵数・兵糧を確認しています… '+percent+'%',progress:percent});
+          }});
+          if(!result?.ok)throw Error(result?.message||'戦果の反映を確認できませんでした。');
+          l.current=true;
+          setSettlement({status:'confirmed',message:result.message||'戦果を反映しました。評定へ進めます。',progress:100});
+          if(u.current)c.current.onDismiss?.();
+          return true;
+        }catch(error){
+          setSettlement({status:'error',message:error?.message||'戦後処理を完了できませんでした。戦闘記録を保持しているので再試行できます。',progress:null});
+          return false;
+        }finally{settlementBusyRef.current=false;}
+      },
       se = (e) => {
         try {
           o.current?.update(e, {
@@ -6611,9 +6642,8 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
             baileyNamesVisible: baileyNamesRef.current,
           });
         } catch {
-          k(
-            `3D表示が停止しました。再表示するか、座標と目標の指定で指示を続けられます。`,
-          );
+          if(rendererModeRef.current==='3d'){graphicsPauseRef.current={wasPaused:d.current};d.current=true;C(true);setRendererMode('2d');k('3D表示が停止したため、2D戦況図へ切り替えます。');}
+          else k('戦場の表示を再読み込みしてください。戦闘記録は保持しています。');
         }
       },
       z = (e) => {
@@ -6624,10 +6654,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
           if (unit) P(draft => ({ ...draft, x: Number(unit.x.toFixed(1)), z: Number(unit.z.toFixed(1)) }));
         }
         se(e);
-        if (e.phase === `finished` && !l.current) {
-          l.current = !0; c.current.onComplete?.(e);
-          if (u.current) c.current.onDismiss?.();
-        }
+        if(e.phase==='finished'&&!l.current&&!settlementBusyRef.current)void finishSettlement(e);
       },
       ce = (e) => (
         e?.ok && z(e.battle),
@@ -6689,6 +6716,9 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
     const rotatePlacement=(rotation)=>{
       placementRotationRef.current=Number(rotation);setPlacementRotation(Number(rotation));se(s.current);
     };
+    rendererModeRef.current=rendererMode;
+    (0,Q_.useEffect)(()=>{try{localStorage.setItem('tenka-battle-renderer',rendererMode);}catch{}},[rendererMode]);
+    (0,Q_.useEffect)(()=>{if(ae&&settlementBannerRef.current){settlementBannerRef.current.focus({preventScroll:true});settlementBannerRef.current.scrollIntoView({block:'start'});}},[ae]);
     ((h.current = {
       select: (e) => {
         let t = s.current.units.find((t) => t.id === e);
@@ -6725,17 +6755,19 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
         let e,
           t = (e) => {
             (e.preventDefault(),
+              (graphicsPauseRef.current={wasPaused:d.current}),
               (d.current = !0),
               C(!0),
               k(
-                `3D表示が停止しました。戦闘を一時停止しています。「戦場を再表示」で復旧できます。`,
-              ));
+                `3D表示が停止したため、2D戦況図へ切り替えます。`,
+              ),setRendererMode('2d'));
           },
           n = () => {
             (k(``), se(s.current));
           };
         try {
-          ((o.current = G_(a.current, {
+          const createRenderer=rendererMode==='2d'?window.TenkaBattle2D.create:G_;
+          ((o.current = createRenderer(a.current, {
             battle: s.current,
             onSelectUnit: (e) => h.current.select?.(e),
             onGroundClick: (e) => h.current.ground?.(e),
@@ -6745,18 +6777,21 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
             (e = a.current.querySelector(`canvas`)),
             e?.addEventListener(`webglcontextlost`, t),
             e?.addEventListener(`webglcontextrestored`, n));
+          if(graphicsPauseRef.current){
+            if(!graphicsPauseRef.current.wasPaused&&s.current.phase==='fighting'){d.current=false;C(false);}
+            graphicsPauseRef.current=null;
+          }
         } catch {
-          k(
-            `3D戦場を表示できません。下の座標指定と目標選択から、布陣と指示を操作できます。`,
-          );
+          for(const canvas of a.current?.querySelectorAll('canvas')||[])canvas.remove();
+          if(rendererMode==='3d'){graphicsPauseRef.current={wasPaused:d.current};d.current=true;C(true);setRendererMode('2d');k('3D戦場を表示できなかったため、2D戦況図へ切り替えます。');}
+          else k('戦場を表示できませんでした。「戦場を再表示」で復旧できます。戦闘記録は保持しています。');
         }
         return () => {
           (e?.removeEventListener(`webglcontextlost`, t),
             e?.removeEventListener(`webglcontextrestored`, n),
-            o.current?.dispose(),
-            (o.current = null));
+            (()=>{try{o.current?.dispose();}catch{}finally{o.current=null;for(const canvas of a.current?.querySelectorAll('canvas')||[])canvas.remove();}})());
         };
-      }, [A]),
+      }, [A,rendererMode]),
       (0, Q_.useEffect)(() => {
         let e,
           t = performance.now(),
@@ -6790,7 +6825,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
           (s.current.phase === `deployment`
             ? c.current.onCancel?.()
             : s.current.phase === `finished`
-              ? c.current.onDismiss?.()
+              ? l.current?c.current.onDismiss?.():void finishSettlement(s.current)
               : ((d.current = !0), C(!0), M(!0)));
       }, [t]),
       (0, Q_.useEffect)(() => {
@@ -6875,7 +6910,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       U = ie && re && av(re) && !u.current,
       ye = Object.values((playerSide==='defender'?g.initialDefender:g.initialAttacker) || {}).reduce((e, t) => e + t, 0),
       W = Object.values((playerSide==='defender'?g.initialAttacker:g.initialDefender) || {}).reduce((e, t) => e + t, 0),
-      be = g.defending?(g.winner===playerSide?'城を守り抜きました':'本丸が陥落しました'):
+      be = g.defending?(g.mode==='field'?(g.winner===playerSide?'野戦で敵を退けました':'野戦で敗れました'):(g.winner===playerSide?'城を守り抜きました':'本丸が陥落しました')):
         g.outcome === `captured`
           ? `城を攻略しました`
           : g.won || g.outcome === `fieldVictory`
@@ -6887,6 +6922,15 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
       "data-phase": g.phase,
       "data-simulation-time": g.time || 0,
       children: [
+        ae&&(0,Z.jsxs)('section',{ref:settlementBannerRef,tabIndex:-1,className:'tenka-battle-settlement '+settlement.status,'data-testid':'battle-settlement','data-status':settlement.status,role:settlement.status==='error'?'alert':'status','aria-live':'polite',children:[
+          (0,Z.jsx)('h3',{children:be}),
+          (0,Z.jsx)('p',{children:settlement.message||'戦後処理を準備しています…'}),
+          settlement.status==='pending'&&(0,Z.jsx)('progress',{max:100,value:settlement.progress??undefined,'aria-label':'戦後処理の進捗'}),
+          settlement.status==='error'&&(0,Z.jsx)('button',{type:'button',className:'primary-button',onClick:()=>void finishSettlement(s.current),children:'戦果の反映を再試行'}),
+          settlement.status==='error'&&(0,Z.jsx)('p',{children:'再試行しても完了しない場合は、今回の戦果を反映せず合戦開始前の状態へ戻れます。領地・兵数・兵糧は開始前の状態を保持します。'}),
+          settlement.status==='error'&&(0,Z.jsx)('button',{type:'button',className:'secondary-button',onClick:()=>{if(window.confirm('今回の戦果は反映されません。合戦開始前の状態に戻りますか？'))c.current.onCancel?.();},children:'戦果を反映せず戻る'}),
+          settlement.status==='confirmed'&&(0,Z.jsx)('button',{type:'button',className:'primary-button',onClick:()=>c.current.onDismiss?.(),children:'結果を確認して評定へ'})
+        ]}),
         (0, Z.jsxs)(`div`, {
           className: `tactical-status`,
           children: [
@@ -6938,10 +6982,21 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
               : ` · 地形と側面への攻撃が戦力に影響`,
           ],
         }),
+        (0,Z.jsxs)('nav',{className:'tenka-battle-display','aria-label':'戦場の表示方式',children:[
+          (0,Z.jsx)('strong',{children:'戦場の表示'}),
+          (0,Z.jsx)('button',{type:'button','aria-pressed':rendererMode==='2d',onClick:()=>setRendererMode('2d'),children:'2D戦況図'}),
+          (0,Z.jsx)('button',{type:'button','aria-pressed':rendererMode==='3d',onClick:()=>setRendererMode('3d'),children:'3D表示'}),
+          (0,Z.jsx)('small',{children:'表示を切り替えても、布陣・兵数・兵糧・戦闘の進行を引き継ぎます。'})
+        ]}),
         castleView&&(0,Z.jsxs)('figure',{className:'tenka-castle-visual'+(castleExpanded?' expanded':''),children:[
-          (0,Z.jsxs)('header',{children:[(0,Z.jsx)('h3',{children:castleView.name+' ／ '+castleView.type}),(0,Z.jsxs)('div',{className:'tenka-castle-view-actions',children:[(0,Z.jsx)('button',{type:'button',className:'tenka-open-castle',onClick:()=>{o.current?.setView('castle');a.current?.scrollIntoView({block:'center'});},children:'3D城郭を見る'}),(0,Z.jsx)('button',{type:'button',onClick:()=>setCastleExpanded(value=>!value),'aria-expanded':castleExpanded,children:castleExpanded?'城の画像を小さくする':'城の画像を大きく見る'})]})]}),
+          (0,Z.jsxs)('header',{children:[(0,Z.jsx)('h3',{children:castleView.name+' ／ '+castleView.type}),(0,Z.jsxs)('div',{className:'tenka-castle-view-actions',children:[(0,Z.jsx)('button',{type:'button',className:'tenka-open-castle',onClick:()=>{o.current?.setView('castle');a.current?.scrollIntoView({block:'center'});},children:rendererMode==='3d'?'3D城郭を見る':'城郭に寄る'}),(0,Z.jsx)('button',{type:'button',onClick:()=>setCastleExpanded(value=>!value),'aria-expanded':castleExpanded,children:castleExpanded?'城の画像を小さくする':'城の画像を大きく見る'})]})]}),
           (0,Z.jsx)('img',{src:castleView.uri,alt:castleView.alt,decoding:'async'}),
           (0,Z.jsx)('figcaption',{children:castleView.caption})
+        ]}),
+        fieldScene&&(0,Z.jsxs)('figure',{className:'tenka-castle-visual tenka-field-visual'+(castleExpanded?' expanded':''),children:[
+          (0,Z.jsxs)('header',{children:[(0,Z.jsx)('h3',{children:'野戦の情景 ／ 実写風の創作画'}),(0,Z.jsx)('button',{type:'button',onClick:()=>setCastleExpanded(value=>!value),'aria-expanded':castleExpanded,children:castleExpanded?'情景を小さくする':'情景を大きく見る'})]}),
+          (0,Z.jsx)('img',{src:fieldScene.uri,alt:fieldScene.alt,decoding:'async',width:fieldScene.width,height:fieldScene.height}),
+          (0,Z.jsx)('figcaption',{children:fieldScene.caption})
         ]}),
         (0, Z.jsxs)(`div`, {
           className: `tactical-layout`,
@@ -6959,7 +7014,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
                   className: `tactical-canvas`,
                   ref: a,
                   "data-testid": `battle-scene`,
-                  "aria-label": `部隊を配置し、移動と攻撃を指示する3D戦場`,
+                  "aria-label": `部隊を配置し、移動と攻撃を指示する${rendererMode==='2d'?'2D':'3D'}戦場`,
                 }),
                 O &&
                   (0, Z.jsxs)(`div`, {
@@ -7086,7 +7141,7 @@ var K_=o((()=>{h_(),z_(),H_(),Gn(),sa(),En()})),q_=o((()=>{})),J_=c({default:()=
                         children: [
                           (0, Z.jsx)(`h3`, { children: be }),
                           (0, Z.jsx)(`p`, {
-                            children: `采配による損失と領地の変化を、全国の情勢に反映しました。`,
+                            children: settlement.status==='confirmed'?`采配による損失と領地の変化を、全国の情勢に反映しました。`:settlement.message||`戦後処理を確認しています。`,
                           }),
                         ],
                       }),
@@ -8668,11 +8723,17 @@ function ey({officer:e,compact:t=!1}){return(0,$.jsxs)(`article`,{className:`off
           });
         }
       },
-      xe = (0, Q.useCallback)((e) => {
-        if (te.current) return;
-        let t = ti(M.current, e);
-        (t.ok && ((te.current = !0), n(t.state), A(t.state.lastBattle)),
-          u({ text: t.message, success: t.ok }));
+      xe = (0, Q.useCallback)(async (e,options={}) => {
+        if(te.current)return {ok:true,message:'戦果は既に反映されています。評定へ進めます。'};
+        try{
+          const snapshot=e.defending?M.current:window.TenkaOrders.sync(M.current,e.sourceId);
+          const verified=await window.TenkaTactics.verifyAsync(snapshot,e,{onProgress:options.onProgress});
+          if(!verified)return {ok:false,message:'合戦記録を確認できませんでした。記録を保持しています。「戦果の反映を再試行」を押してください。'};
+          const result=ti(M.current,e);
+          if(result.ok){te.current=true;n(result.state);A(result.state.lastBattle);}
+          u({text:result.message,success:result.ok});
+          return result;
+        }catch(error){return {ok:false,message:error?.message||'戦後処理でエラーが発生しました。再試行できます。'};}
       }, []),
       Ce = (0, Q.useCallback)(() => {
         (O(null), c(null));
@@ -10250,7 +10311,7 @@ function ey({officer:e,compact:t=!1}){return(0,$.jsxs)(`article`,{className:`off
         s === `tactical` &&
           D &&
           (0, $.jsx)(Qv, {
-            title: `3D${D.mode === `field` ? `野戦` : `攻城戦`} — ${F.name}`,
+            title: `${D.mode === `field` ? `野戦` : `攻城戦`} — ${D.targetCastle?.name||F.name}`,
             eyebrow: k ? `采配の結果` : `部隊を配置し、戦場で指示する`,
             onClose: Ee,
             wide: !0,
