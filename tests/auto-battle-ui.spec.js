@@ -29,6 +29,9 @@ function harness(input=battle(),options={}){
 }
 function fighting(options={}){const value=battle();value.phase='fighting';return harness(value,options);}
 function start(screen){screen.click('自動命令');screen.click('自動進行を開始');screen.render();}
+function threeTargetBattle(mode='field',defending=false){const value=battle(mode,defending),side=value.units[2].side;value.units.push({id:'enemy-b',side,type:'archer',commanderName:'山県昌景',x:20,z:-70,troops:900,status:'ready'},{id:'enemy-c',side,type:'firearm',commanderName:'馬場信春',x:-20,z:-60,troops:700,status:'ready'});return value;}
+function setSequence(screen,after=['next','next','wait']){for(let i=0;i<3;i++){screen.change('select',['第一目標','第二目標','第三目標'][i],['enemy-a','enemy-b','enemy-c'][i]);screen.change('select',['第一目標の撃破後','第二目標の撃破後','第三目標の撃破後'][i],after[i]);}screen.click('目標の順序を設定');screen.render();}
+function progress(screen){return flatten(screen.render()).find(node=>node.props?.['data-testid']==='target-sequence-progress');}
 
 test('deployment presets cover field, siege and defense without changing troops or starting combat',()=>{
   for(const [mode,defense]of[['field',false],['siege',false],['siege',true]]){
@@ -105,4 +108,67 @@ test('a finished turn reports its actual result exactly once and unmount cancels
 
 test('manual execution keeps the original explicit one-turn flow and rejects simultaneous presses',async()=>{
   const screen=fighting();screen.click('防御を計画');assert.equal(screen.calls[0].kind,'manual-order');screen.render();const button=screen.control('button','このターンを実行'),first=button.props.onClick();button.props.onClick();assert.equal(screen.timers.size,1);screen.flush();await first;screen.render();assert.equal(screen.calls.filter(c=>c.kind==='manual-end').length,1);assert.equal(screen.timers.size,0);assert.ok(screen.control('button','このターンを実行'));
+});
+
+test('three optional goals are prepared per unit in field, siege and defense without starting or altering a battle',()=>{
+  for(const [mode,defense]of[['field',false],['siege',false],['siege',true]]){
+    const input=threeTargetBattle(mode,defense),before=JSON.stringify(input),screen=harness(input);setSequence(screen,['next','wait','defend']);
+    const state=progress(screen);assert.equal(state.props['data-sequence-index'],0);assert.equal(state.props['data-sequence-paused'],'false');
+    const rows=flatten(state).filter(node=>node.props?.['data-sequence-goal']!==undefined);assert.equal(rows.length,3);assert.deepEqual(rows.map(node=>node.props['data-goal-status']),['current','remaining','remaining']);
+    assert.match(content(state),/第一目標：武田信玄/);assert.match(content(state),/第二目標：山県昌景/);assert.match(content(state),/第三目標：馬場信春/);assert.match(content(state),/撃破後：防御/);
+    assert.equal(screen.timers.size,0);assert.equal(screen.calls.length,0);assert.equal(JSON.stringify(input),before);
+    screen.change('input','開戦後に自動進行',true);screen.props.battle={...screen.props.battle,phase:'fighting'};screen.render();screen.flush();
+    assert.deepEqual(screen.calls[0].orders['own-a'],{action:'attack',targetId:'enemy-a',sequence:[{targetId:'enemy-a',after:'next'},{targetId:'enemy-b',after:'wait'},{targetId:'enemy-c',after:'defend'}],sequenceIndex:0,sequencePaused:false});
+    assert.equal(screen.calls[0].orders['own-b'],undefined,'another unit receives no implicit targets');
+  }
+});
+
+test('a missing first, gapped third, duplicate or unknown goal never installs a partial sequence',()=>{
+  const input=threeTargetBattle();input.phase='fighting';const screen=harness(input);screen.click('自動命令');
+  screen.change('select','自動進行の攻撃目標','enemy-a');screen.click('この目標へ攻撃を継続');
+  screen.click('目標の順序を設定');assert.match(screen.text(),/第一目標を選んで/);assert.equal(progress(screen),undefined);
+  screen.change('select','第一目標','enemy-a');screen.change('select','第三目標','enemy-c');screen.click('目標の順序を設定');assert.match(screen.text(),/第二目標を選んで/);assert.equal(progress(screen),undefined);
+  screen.change('select','第二目標','enemy-a');screen.click('目標の順序を設定');assert.match(screen.text(),/同じ攻撃目標は重ねず/);assert.equal(progress(screen),undefined);
+  screen.change('select','第二目標','enemy-b');screen.change('select','第三目標','not-a-target');screen.click('目標の順序を設定');assert.match(screen.text(),/選び直して/);assert.equal(progress(screen),undefined);
+  assert.equal(screen.timers.size,0);screen.click('自動進行を開始');screen.render();screen.flush();assert.deepEqual(screen.calls[0].orders['own-a'],{action:'attack',targetId:'enemy-a'});
+});
+
+test('a completed first target retains its name and next target advances only after an explicit unit resume',()=>{
+  const input=threeTargetBattle();input.phase='fighting';let passes=0;
+  const screen=harness(input,{advance(value,orders){const next=clone(value);next.turnNumber++;next.time+=8;passes++;const command=clone(orders['own-a']);if(passes===1){next.units.find(unit=>unit.id==='enemy-a').troops=0;next.units.find(unit=>unit.id==='enemy-a').status='destroyed';command.action='defend';delete command.targetId;command.sequenceIndex=1;command.sequencePaused=true;}return {ok:true,battle:next,orders:{...clone(orders),'own-a':command},message:'命令実行',notices:[]};}});
+  screen.click('自動命令');setSequence(screen,['defend','next','wait']);screen.props.selectedUnitId='own-b';screen.click('この部隊を待機');screen.props.selectedUnitId='own-a';screen.click('自動進行を開始');screen.render();screen.flush();
+  let state=progress(screen);assert.equal(state.props['data-sequence-index'],1);assert.equal(state.props['data-sequence-paused'],'true');assert.match(content(state),/第一目標：武田信玄達成済み/);assert.match(content(state),/第二目標：山県昌景次の目標（防御中）/);
+  assert.equal(screen.control('select','第一目標').props.value,'enemy-a');assert.match(content(screen.control('select','第一目標')),/武田信玄.*撃破・敗走済み/);
+  screen.click('自動進行を一時停止');screen.render();assert.equal(screen.timers.size,0);const before=JSON.stringify(screen.props.battle);
+  screen.click('次の目標へ進む');screen.render();state=progress(screen);assert.equal(state.props['data-sequence-paused'],'false');assert.equal(state.props['data-sequence-index'],1);assert.match(content(state),/第二目標：山県昌景現在の目標/);assert.equal(screen.timers.size,0);assert.equal(JSON.stringify(screen.props.battle),before);assert.match(screen.text(),/全体の自動進行は停止したまま/);
+  screen.click('自動進行を開始');screen.render();screen.flush();const command=screen.calls.at(-1).orders['own-a'];assert.equal(command.targetId,'enemy-b');assert.equal(command.sequenceIndex,1);assert.equal(command.sequencePaused,false);assert.equal(command.sequence.length,3);assert.deepEqual(screen.calls.at(-1).orders['own-b'],{action:'wait'});
+});
+
+test('global pause and resume keep a per-unit target break paused until its own resume button is used',()=>{
+  const input=threeTargetBattle();input.phase='fighting';const screen=harness(input,{advance(value,orders){const command=clone(orders['own-a']);if(command.sequenceIndex===0){command.sequenceIndex=1;command.sequencePaused=true;command.action='wait';delete command.targetId;}return {ok:true,battle:{...clone(value),turnNumber:value.turnNumber+1},orders:{...clone(orders),'own-a':command},notices:[]};}});
+  screen.click('自動命令');setSequence(screen,['wait','next','wait']);screen.click('自動進行を開始');screen.render();screen.flush();assert.equal(progress(screen).props['data-sequence-paused'],'true');
+  screen.click('自動進行を一時停止');screen.render();screen.click('自動進行を開始');screen.render();screen.flush();assert.equal(screen.calls.at(-1).orders['own-a'].action,'wait');assert.equal(screen.calls.at(-1).orders['own-a'].sequencePaused,true);assert.equal(progress(screen).props['data-sequence-index'],1);
+});
+
+test('editing a progressing plan restarts that unit at the revised first goal and leaves other units untouched',()=>{
+  const input=threeTargetBattle();input.phase='fighting';const screen=harness(input);screen.click('自動命令');setSequence(screen);
+  screen.props.selectedUnitId='own-b';screen.change('select','自動進行の攻撃目標','enemy-b');screen.click('この目標へ攻撃を継続');screen.props.selectedUnitId='own-a';screen.render();
+  screen.change('select','第一目標','enemy-c');screen.change('select','第二目標','enemy-a');screen.change('select','第三目標','');screen.change('select','第二目標の撃破後','retreat');screen.click('目標の順序を設定');
+  screen.click('自動進行を開始');screen.render();screen.flush();assert.deepEqual(screen.calls[0].orders,{'own-a':{action:'attack',targetId:'enemy-c',sequence:[{targetId:'enemy-c',after:'next'},{targetId:'enemy-a',after:'retreat'}],sequenceIndex:0,sequencePaused:false},'own-b':{action:'attack',targetId:'enemy-b'}});
+});
+
+test('simple auto commands, canvas orders, doctrine and successful manual commands clear only that unit sequence',()=>{
+  for(const action of ['wait','defend','retreat','attack','move','canvas','doctrine','manual','external-manual']){
+    const input=threeTargetBattle();input.phase='fighting';const screen=harness(input);screen.click('自動命令');setSequence(screen);screen.props.selectedUnitId='own-b';screen.click('この部隊を防御');screen.props.selectedUnitId='own-a';screen.render();
+    if(action==='wait')screen.click('この部隊を待機');else if(action==='defend')screen.click('この部隊を防御');else if(action==='retreat')screen.click('この部隊を退却');else if(action==='attack'){screen.change('select','自動進行の攻撃目標','enemy-b');screen.click('この目標へ攻撃を継続');}else if(action==='move'){screen.change('input','自動進行の移動先の東西','30');screen.change('input','自動進行の移動先の南北','20');screen.click('この地点へ移動を継続');}else if(action==='canvas')screen.controller.order('attack',{targetId:'enemy-c'},'own-a');else if(action==='doctrine')screen.controller.doctrine('own-a','brace');else if(action==='manual'){screen.click('手動ターン');screen.click('待機に戻す');screen.click('自動命令');}else{screen.click('手動ターン');screen.controller.clearOrder('own-a');screen.click('自動命令');}
+    screen.render();assert.equal(progress(screen),undefined,action);screen.click('自動進行を開始');screen.render();screen.flush();const call=screen.calls.find(entry=>entry.kind==='auto');assert.equal(call.orders['own-a']?.sequence,undefined,action);assert.deepEqual(call.orders['own-b'],{action:'defend'},action);
+  }
+});
+
+test('all completed goals show the final command and retreat with remaining goals offers no accidental resume',()=>{
+  for(const [index,action]of[[3,'wait'],[3,'defend'],[1,'retreat']]){
+    const input=threeTargetBattle();input.phase='fighting';const screen=harness(input,{advance(value,orders){const command={...clone(orders['own-a']),action,sequenceIndex:index,sequencePaused:false};delete command.targetId;return {ok:true,battle:{...clone(value),turnNumber:2},orders:{'own-a':command},notices:[]};}});screen.click('自動命令');setSequence(screen,['retreat','next',action==='defend'?'defend':'next']);screen.click('自動進行を開始');screen.render();screen.flush();
+    const state=progress(screen);assert.equal(state.props['data-sequence-index'],index);assert.equal(state.props['data-sequence-paused'],'false');assert.equal(flatten(state).some(node=>node.type==='button'&&content(node)==='次の目標へ進む'),false);
+    assert.match(content(state),action==='retreat'?/残りの目標へは自動で進みません/:new RegExp('全目標達成後：'+(action==='wait'?'待機':'防御')));
+  }
 });

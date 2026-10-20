@@ -4,6 +4,7 @@
   // battle record. Each call emits the same legal orders and single turn that a
   // player can issue manually, so the existing replay/settlement checks apply.
   const ACTIONS = new Set(["attack", "move", "wait", "defend", "retreat"]);
+  const AFTER_ACTIONS = new Set(["next", "wait", "defend", "retreat"]);
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
   const live = unit => unit.troops > 0 && !["routed", "destroyed"].includes(unit.status);
   const side = battle => battle.playerSide || "attacker";
@@ -182,24 +183,94 @@
       || (battle.fortifications || []).find(item => item.id === instruction.targetId && item.side !== unit.side && item.hp > 0) || null;
   }
   function invalid(battle, orders, message) { return { ok: false, battle, orders, message, notices: [] }; }
+  function targetError(battle, unit, targetId) {
+    if (targetId === "capture") return battle.mode !== "siege" || unit.side !== "attacker" || unit.type === "navy"
+      ? "本丸制圧は攻城側の陸上部隊に指定してください。" : null;
+    if (typeof targetId !== "string" || !targetId) return "自動攻撃の目標を選んでください。";
+    const target = battle.units.find(item => item.id === targetId)
+      || battle.structures.find(item => item.id === targetId)
+      || (battle.fortifications || []).find(item => item.id === targetId);
+    return !target || target.side === unit.side || (own(target, "hp") && battle.structures.includes(target) && unit.side !== "attacker")
+      ? "攻撃できる敵部隊・城門・敵の施設を選んでください。" : null;
+  }
+  function sequenceError(battle, unit, instruction) {
+    const sequence = instruction.sequence, index = instruction.sequenceIndex, paused = instruction.sequencePaused;
+    if (!Array.isArray(sequence) || sequence.length < 1 || sequence.length > 3)
+      return "攻撃目標は第一目標から順に一つ以上、三つ以内で指定してください。";
+    const seen = new Set();
+    for (const goal of sequence) {
+      if (!goal || typeof goal !== "object" || Array.isArray(goal) || !AFTER_ACTIONS.has(goal.after))
+        return "各目標の撃破後は、次の目標・待機・防御・退却から選んでください。";
+      const error = targetError(battle, unit, goal.targetId);
+      if (error) return error;
+      if (seen.has(goal.targetId)) return "同じ目標を重複して指定することはできません。";
+      seen.add(goal.targetId);
+    }
+    if (!Number.isInteger(index) || index < 0 || index > sequence.length || typeof paused !== "boolean")
+      return "攻撃目標の進行状況を確認し、目標の順序を設定し直してください。";
+    if (index === sequence.length) {
+      const final = sequence.at(-1).after === "next" ? "wait" : sequence.at(-1).after;
+      if (paused || instruction.action !== final || instruction.targetId !== undefined)
+        return "すべての目標を達成した後の命令を確認してください。";
+    } else if (paused) {
+      if (index === 0 || !["wait", "defend"].includes(instruction.action)
+        || sequence[index - 1].after !== instruction.action || instruction.targetId !== undefined)
+        return "待機・防御中の次の目標と命令を確認してください。";
+    } else if (instruction.action === "retreat") {
+      if (index === 0 || sequence[index - 1].after !== "retreat" || instruction.targetId !== undefined)
+        return "目標達成後の退却命令を確認してください。";
+    } else if (instruction.action !== "attack" || instruction.targetId !== sequence[index].targetId) {
+      return "現在の攻撃命令と、順序を設定した目標が一致していません。";
+    }
+    return null;
+  }
+  function copyOrder(instruction) {
+    const answer = instruction.action === "move" ? { action: "move", x: instruction.x, z: instruction.z }
+      : instruction.action === "attack" ? { action: "attack", targetId: instruction.targetId } : { action: instruction.action };
+    if (own(instruction, "sequence")) Object.assign(answer, {
+      sequence: instruction.sequence.map(goal => ({ targetId: goal.targetId, after: goal.after })),
+      sequenceIndex: instruction.sequenceIndex, sequencePaused: instruction.sequencePaused
+    });
+    return answer;
+  }
+  function progressSequence(battle, unit, instruction, notify) {
+    if (!instruction.sequence || instruction.action !== "attack") return instruction;
+    let next = instruction;
+    while (next.sequenceIndex < next.sequence.length) {
+      const goal = next.sequence[next.sequenceIndex];
+      const complete = goal.targetId === "capture" ? battle.phase === "finished" && battle.winner === unit.side
+        : !targetFor(battle, unit, goal);
+      if (!complete) break;
+      const index = next.sequenceIndex + 1, atEnd = index === next.sequence.length;
+      const action = goal.after === "next" ? atEnd ? "wait" : "attack" : goal.after;
+      next = { action, sequence: next.sequence, sequenceIndex: index,
+        sequencePaused: !atEnd && ["wait", "defend"].includes(action) };
+      if (action === "attack") next.targetId = next.sequence[index].targetId;
+      const following = action === "attack" ? `第${index + 1}目標へ進みます。`
+        : action === "retreat" ? "命令に従い退却します。"
+          : action === "defend" ? "命令に従い防御します。" : "命令に従い待機します。";
+      notify(unit, `第${index}目標の達成を確認しました。${following}`);
+      if (action !== "attack") break;
+    }
+    return next;
+  }
   function normalize(battle, orders) {
     if (!orders || typeof orders !== "object" || Array.isArray(orders)) return "部隊ごとの自動命令を指定してください。";
     for (const [id, instruction] of Object.entries(orders)) {
       const unit = battle.units.find(item => item.id === id && item.side === side(battle));
       if (!unit || !instruction || typeof instruction !== "object" || !ACTIONS.has(instruction.action)) return "自軍の部隊と有効な自動命令を指定してください。";
+      if (own(instruction, "sequence")) {
+        const error = sequenceError(battle, unit, instruction);
+        if (error) return error;
+      } else if (own(instruction, "sequenceIndex") || own(instruction, "sequencePaused")) {
+        return "目標の順序と進行状況を一緒に指定してください。";
+      }
       if (!live(unit)) continue;
       if (instruction.action === "move" && (![instruction.x, instruction.z].every(Number.isFinite)
         || impassable(battle, unit, instruction.x, instruction.z))) return "自動移動の目的地は、部隊が通れる戦場内の場所を指定してください。";
       if (instruction.action === "attack") {
-        if (instruction.targetId === "capture") {
-          if (battle.mode !== "siege" || unit.side !== "attacker" || unit.type === "navy") return "本丸制圧は攻城側の陸上部隊に指定してください。";
-        } else {
-          if (typeof instruction.targetId !== "string" || !instruction.targetId) return "自動攻撃の目標を選んでください。";
-          const target = battle.units.find(item => item.id === instruction.targetId)
-            || battle.structures.find(item => item.id === instruction.targetId)
-            || (battle.fortifications || []).find(item => item.id === instruction.targetId);
-          if (!target || target.side === unit.side || (own(target, "hp") && battle.structures.includes(target) && unit.side !== "attacker")) return "攻撃できる敵部隊・城門・敵の施設を選んでください。";
-        }
+        const error = targetError(battle, unit, instruction.targetId);
+        if (error) return error;
       }
     }
     return null;
@@ -219,9 +290,9 @@
       return answer;
     };
     for (const unit of battle.units.filter(item => item.side === side(battle))) {
-      const given = own(standingOrders, unit.id) ? standingOrders[unit.id] : { action: "wait" };
-      orders[unit.id] = given.action === "move" ? { action: "move", x: given.x, z: given.z }
-        : given.action === "attack" ? { action: "attack", targetId: given.targetId } : { action: given.action };
+      const saved = own(standingOrders, unit.id) ? standingOrders[unit.id] : { action: "wait" };
+      const given = progressSequence(battle, unit, copyOrder(saved), notify);
+      orders[unit.id] = given;
       if (!live(unit)) continue;
       const clear = issue({ unitId: unit.id, order: "wait" });
       if (!clear.ok) return invalid(battle, standingOrders, clear.message);
@@ -269,7 +340,9 @@
     next = answer.battle;
     for (const [id, instruction] of Object.entries(orders)) {
       const unit = next.units.find(item => item.id === id);
-      if (instruction.action === "move" && live(unit) && distance(unit, instruction) <= .65) {
+      if (instruction.sequence) {
+        orders[id] = progressSequence(next, unit, instruction, notify);
+      } else if (instruction.action === "move" && live(unit) && distance(unit, instruction) <= .65) {
         orders[id] = { action: "wait" }; notify(unit, "目的地に到着したため待機します。");
       } else if (instruction.action === "attack" && instruction.targetId !== "capture" && !targetFor(next, unit, instruction)) {
         orders[id] = { action: "wait" }; notify(unit, "指定目標が戦線を離れたため待機します。次の目標を選んでください。");
@@ -278,5 +351,5 @@
     return { ok: true, battle: next, orders, notices, message: next.phase === "finished" ? "合戦の決着がつきました。戦果を確認してください。"
       : notices.length ? notices.map(item => item.message).join(" ") : `自動で一ターン進行しました（第${next.turnNumber}ターン）。` };
   }
-  root.TenkaAutoBattle = Object.freeze({ version: 1, advance });
+  root.TenkaAutoBattle = Object.freeze({ version: 2, advance });
 })(typeof window !== "undefined" ? window : globalThis);
