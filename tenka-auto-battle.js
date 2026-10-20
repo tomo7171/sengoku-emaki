@@ -48,12 +48,19 @@
       from.x + (to.x - from.x) * i / steps, from.z + (to.z - from.z) * i / steps, padding)) return false;
     return true;
   }
+  function endpointBlocked(battle, unit, x, z) {
+    if (impassable(battle, unit, x, z)) return true;
+    // A garrison may march THROUGH its own gate, but a native turn waypoint
+    // must stand clear of its intact footprint (the gate opens during move).
+    return unit.type !== "navy" && battle.defending && unit.side === "defender" && battle.structures.some(item =>
+      (item.kind || item.type) === "gate" && item.hp > 0 && !item.passable && contains(item, x, z, .5));
+  }
   function castleRoute(battle, unit, goal) {
     if (battle.mode !== "siege" || unit.type === "navy") return [];
     // Exact historical approach/gate centers keep the planner on narrow
     // switchback passages that a world-sized coarse grid can miss.
     const points = [[unit.x, unit.z], [goal.x, goal.z], ...(battle.layout.paths[0]?.points || [])];
-    for (const gate of battle.structures.filter(item => (item.kind || item.type) === "gate" && item.hp <= 0)) {
+    for (const gate of battle.structures.filter(item => (item.kind || item.type) === "gate" && (item.hp <= 0 || item.passable || battle.defending && unit.side === "defender"))) {
       points.push([gate.x, gate.z - 1.8], [gate.x, gate.z], [gate.x, gate.z + 1.8]);
     }
     for (const hall of battle.structures.filter(item => (item.kind || item.type) === "hall" && item.hp > 0)) {
@@ -142,7 +149,17 @@
     for (const [x, z] of path) {
       const waypoint = { x, z }, length = distance(unit, waypoint);
       const candidate = length > budget ? { x: unit.x + (x - unit.x) * budget / length, z: unit.z + (z - unit.z) * budget / length } : waypoint;
-      if (segmentOpen(battle, unit, unit, candidate) && distance(unit, candidate) > .12) answer = candidate;
+      if (segmentOpen(battle, unit, unit, candidate) && distance(unit, candidate) > .12) {
+        let legal = candidate;
+        if (endpointBlocked(battle, unit, legal.x, legal.z)) {
+          legal = null;
+          for (let trim = .4; trim < Math.min(length, budget); trim += .4) {
+            const usable = Math.min(length, budget) - trim, point = { x: unit.x + (candidate.x - unit.x) * usable / Math.max(.001, distance(unit, candidate)), z: unit.z + (candidate.z - unit.z) * usable / Math.max(.001, distance(unit, candidate)) };
+            if (!endpointBlocked(battle, unit, point.x, point.z)) { legal = point; break; }
+          }
+        }
+        if (legal && distance(unit, legal) > .12) answer = legal;
+      }
       else if (answer) break;
       if (length > budget) break;
     }
@@ -151,11 +168,37 @@
   function reachFor(unit, target) {
     return unit.range + (Number.isFinite(target.troops) ? 0 : Math.max(target.w ?? target.width ?? 0, target.d ?? target.depth ?? 0) / 2);
   }
+  function crossingGate(battle, unit, target) {
+    if (battle.mode !== "siege" || unit.side !== "attacker" || unit.type === "navy") return null;
+    const gates = battle.structures.filter(item => (item.kind || item.type) === "gate" && item.hp > 0 && !item.passable);
+    if (!gates.length) return null;
+    // Plan the route through gate openings, then command the first gate that
+    // actually blocks that route. This is an approach to the selected enemy,
+    // not a replacement of its standing objective/sequence.
+    const open = { ...battle, structures: battle.structures.map(item => gates.includes(item) ? { ...item, passable: true } : item) };
+    for (const goal of attackGoals(battle, unit, target)) {
+      const points = castleRoute(open, unit, goal);
+      if (!points.length) continue;
+      let from = unit;
+      for (const [x, z] of points) {
+        const to = { x, z }, steps = Math.max(1, Math.ceil(distance(from, to) / .45));
+        for (let step = 1; step <= steps; step++) {
+          const px = from.x + (x - from.x) * step / steps, pz = from.z + (z - from.z) * step / steps;
+          const gate = gates.find(item => contains(item, px, pz, .6));
+          if (gate) return gate.id === target.id ? null : gate;
+        }
+        from = to;
+      }
+      // The best usable path is already clear; no unrelated gate is needed.
+      return null;
+    }
+    return null;
+  }
   function attackGoals(battle, unit, target) {
     const reach = reachFor(unit, target), angle = Math.atan2(unit.z - target.z, unit.x - target.x), goals = [];
     for (const offset of [0, .35, -.35, .7, -.7, Math.PI / 2, -Math.PI / 2, Math.PI]) {
       const radius = Math.max(.3, reach - .7), point = { x: target.x + Math.cos(angle + offset) * radius, z: target.z + Math.sin(angle + offset) * radius };
-      if (!impassable(battle, unit, point.x, point.z)) goals.push(point);
+      if (!endpointBlocked(battle, unit, point.x, point.z)) goals.push(point);
     }
     return goals;
   }
@@ -267,7 +310,7 @@
       }
       if (!live(unit)) continue;
       if (instruction.action === "move" && (![instruction.x, instruction.z].every(Number.isFinite)
-        || impassable(battle, unit, instruction.x, instruction.z))) return "自動移動の目的地は、部隊が通れる戦場内の場所を指定してください。";
+        || endpointBlocked(battle, unit, instruction.x, instruction.z))) return "自動移動の目的地は、部隊が通れる戦場内の場所を指定してください。";
       if (instruction.action === "attack") {
         const error = targetError(battle, unit, instruction.targetId);
         if (error) return error;
@@ -303,7 +346,7 @@
         }
         continue;
       }
-      const target = given.action === "attack" ? targetFor(battle, unit, given) : null;
+      let target = given.action === "attack" ? targetFor(battle, unit, given) : null;
       if (given.action === "attack" && !target && given.targetId !== "capture") {
         orders[unit.id] = { action: "wait" }; notify(unit, "指定目標が戦線を離れたため待機します。次の目標を選んでください。"); continue;
       }
@@ -311,6 +354,18 @@
         const answer = issue({ unitId: unit.id, order: "attack", targetId: target.id });
         if (!answer.ok) return invalid(battle, standingOrders, answer.message);
         continue;
+      }
+      if (target) {
+        const gate = crossingGate(battle, unit, target);
+        if (gate) {
+          target = gate;
+          notify(unit, `${gate.name || "城門"}を突破して、指定した目標へ進みます。`);
+          if (distance(unit, target) <= reachFor(unit, target) - .02) {
+            const answer = issue({ unitId: unit.id, order: "attack", targetId: target.id });
+            if (!answer.ok) return invalid(battle, standingOrders, answer.message);
+            continue;
+          }
+        }
       }
       const goals = given.action === "move" ? [{ x: given.x, z: given.z }]
         : target ? attackGoals(battle, unit, target) : [captureDestination(battle, unit)].filter(Boolean);

@@ -83,6 +83,37 @@ test('auto turns wait for parent acknowledgement and stale callbacks never dupli
   screen.props.battle=screen.results[0].battle;screen.render();screen.flush();assert.equal(screen.calls.length,2);
 });
 
+test('running auto turns continue across selection, draft and ordinary parent refreshes in all battle modes',()=>{
+  for(const[mode,defending]of[['field',false],['siege',false],['siege',true]]){
+    const input=battle(mode,defending);input.phase='fighting';const screen=harness(input);start(screen);
+    screen.change('select','自動進行の攻撃目標','enemy-a');screen.click('この目標へ攻撃を継続');
+    for(let turn=0;turn<5;turn++){
+      screen.props.selectedUnitId=turn%2?'own-a':'own-b';screen.render();
+      screen.change('input','自動進行の移動先の東西',String(20+turn));
+      screen.change('input','自動進行の移動先の南北',String(30-turn));
+      screen.props.battle=clone(screen.props.battle);screen.render();
+      assert.equal(screen.timers.size,1,'editing or a parent refresh keeps one scheduled turn');
+      assert.match(screen.text(),/自動進行中/);screen.flush();
+      assert.equal(screen.calls.filter(call=>call.kind==='auto').length,turn+1);
+      assert.equal(screen.props.battle.turnNumber,turn+2);
+      assert.equal(screen.props.battle.food,700-5*(turn+1));
+      assert.equal(screen.timers.size,1,'the accepted result schedules the following turn');
+      assert.deepEqual(screen.calls.at(-1).orders,{'own-a':{action:'attack',targetId:'enemy-a'}},'unsubmitted coordinate drafts never overwrite a running command');
+    }
+    screen.unmount();assert.equal(screen.timers.size,0);
+  }
+});
+
+test('a delayed cloned parent acknowledgement resumes a running timer after intervening speed and draft edits',()=>{
+  const screen=fighting({ack:false});start(screen);screen.flush();assert.equal(screen.calls.length,1);
+  screen.change('select','自動進行の速度','4');screen.change('input','自動進行の移動先の東西','24');screen.render();
+  screen.flush();assert.equal(screen.calls.length,1,'pending acknowledgement cannot duplicate an unaccepted turn');
+  assert.match(screen.text(),/自動進行中/);screen.props.battle=clone(screen.results[0].battle);screen.render();
+  assert.equal(screen.timers.size,1);assert.equal(screen.pending()[0].delay,300);screen.flush();
+  assert.equal(screen.calls.length,2);assert.equal(screen.calls[1].value.turnNumber,2);
+  screen.props.battle=clone(screen.results[1].battle);screen.render();assert.equal(screen.timers.size,1);
+});
+
 test('canvas and doctrine controllers update continuous orders and are disabled in manual mode',()=>{
   const screen=fighting();screen.render();assert.equal(screen.controller.enabled,false);start(screen);assert.equal(screen.controller.enabled,true);
   assert.equal(screen.controller.order('attack',{targetId:'enemy-a'},'own-a'),true);assert.equal(screen.controller.order('move',{x:40,z:-20},'own-b'),true);screen.render();

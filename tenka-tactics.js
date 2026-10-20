@@ -477,6 +477,12 @@
     next._turnExecuting = true;
     for (const unit of next.units.filter(item => item.side === side && active(item))) {
       const plan = unit.turnPlan || { action: "wait", move: null, targetId: null };
+      // Release concealment when the chosen advance, attack or withdrawal
+      // executes; editing an uncommitted plan must not expose an ambush.
+      if (plan.move || ["attack", "retreat"].includes(plan.action)) {
+        unit.ambush = false;
+        unit.revealed = true;
+      }
       unit._turnMovement = movementBudget(next, unit);
       unit._turnAttackSpent = false;
       unit.order = plan.action === "retreat" ? "retreat" : plan.move ? "move" : "hold";
